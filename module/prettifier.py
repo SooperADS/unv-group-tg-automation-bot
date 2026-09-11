@@ -137,7 +137,7 @@ def current_lesson(schedule: Schedule, timestamp: datetime) -> str:
 			nl_str = None
 			lesson_str = str_lesson_in_place(lesson, j, schedule)
 
-			LAST_LESSON_MARKER = " *ПОСЛЕДНЯЯ*\\"
+			LAST_LESSON_MARKER = " *ПОСЛЕДНЯЯ*"
 
 			if nl is not None:
 				nl_str = str_lesson_in_place(nl, k, schedule)
