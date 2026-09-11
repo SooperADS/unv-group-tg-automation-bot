@@ -1,0 +1,250 @@
+{
+	"$schema": "https://json-schema.org/draft/2020-12/schema",
+	"$defs": {
+		"exam-kind": {
+			"description": "\"simple\" - обычный зачёт\n\"diff\" - дифференцированный зачёт\n\"full\" - экзамен\nnull - неизвестно",
+			"enum": [ "simple", "full", "diff", null ]
+		},
+		"lesson-kind": {
+			"description": "\"lecture\" - лекция\n\"practice\" - практика\n\"consultation\" - консультация\n\"exam\" - экзамен",
+			"enum": [ "lecture", "practice", "consultation", "exam" ]
+		},
+
+		"id": {
+			"minLength": 1,
+			"maxLength": 16,
+			"pattern": "^[A-Za-z0-9\\-]*$"
+		},
+		"link": {
+			"type": "string",
+			"pattern": "^https?:\/\/[-a-zA-Z0-9@:%._\\/+~#=]{1,256}$"
+		},
+		"link?": {
+			"oneOf": [
+				{
+					"$ref": "#/$defs/link"
+				},
+				{
+					"type": "null"
+				}
+			]
+		},
+		"timing": {
+			"type": "string",
+			"minLength": 1,
+			"maxLength": 5,
+			"pattern": "^([0-1]?[0-9]|2[0-3]):[0-5][0-9]$"
+		},
+		"uuid": {
+			"type": "string",
+			"minLength": 36,
+			"maxLength": 36,
+			"pattern": "^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$"
+		},
+
+		"lesson": {
+			"type": "array",
+			"minItems": 2,
+			"maxItems": 2,
+			"prefixItems": [
+				{
+					"$ref": "#/$defs/id"
+				},
+				{
+					"$ref": "#/$defs/lesson-kind"
+				}
+			]
+		},
+		"subject": {
+			"type": "object",
+			"title": "Описатель дисциплины",
+			"properties": {
+				"chat": {
+					"title": "Ссылка на чат предмета",
+					"oneOf": [
+						{
+							"$ref": "#/$defs/link?"
+						},
+						{
+							"type": "object",
+							"properties": {
+								"main": {
+									"$ref": "#/$defs/link?"
+								},
+								"lecture": {
+									"$ref": "#/$defs/link?"
+								},
+								"practice": {
+									"$ref": "#/$defs/link?"
+								}
+							},
+							"additionalProperties": false,
+							"minProperties": 1
+						}
+					]
+				},
+				"name": {
+					"type": "string",
+					"title": "Имя предмета"
+				},
+				"tag": {
+					"type": "string",
+					"title": "Тег предмета",
+					"pattern": "^[-A-Za-z0-9А-Яа-яЁё]+$"
+				},
+				"exam": {
+					"title": "Форма зачёта",
+					"$ref": "#/$defs/exam-kind"
+				}
+			},
+			"additionalProperties": false,
+			"required": [ "name", "tag", "exam" ]
+		},
+		"day": {
+			"type": "array",
+			"minItems": 1,
+			"items": {
+				"title": "Пары за день",
+				"oneOf": [
+					{
+						"$ref": "#/$defs/lesson"
+					},
+					{
+						"type": "null"
+					}
+				]
+			}
+		},
+		"week": {
+			"type": "array",
+			"minItems": 1,
+			"maxItems": 7,
+			"items": {
+				"oneOf": [
+					{
+						"$ref": "#/$defs/day"
+					},
+					{
+						"type": "null"
+					}
+				]
+			}
+		},
+
+		"week-ref": {
+			"oneOf": [
+				{
+					"type": "null"
+				},
+				{
+					"type": "array",
+					"$ref": "#/$defs/week"
+				},
+				{
+					"type": "string",
+					"$ref": "#/$defs/id"
+				}
+			]
+		},
+		"schedule-note": {
+			"type": "object",
+			"properties": {
+				"pattern": {
+					"type": "array",
+					"title": "Недели, которые будут повторятся",
+					"minItems": 1,
+					"items": {
+						"$ref": "#/$defs/week-ref"
+					}
+				},
+				"count": {
+					"type": "integer",
+					"title": "Количество повторов",
+					"minimum": 1
+				}
+			},
+			"required": [ "count", "pattern" ]
+		}
+	},
+
+	"type": "object",
+	"properties": {
+		"general": {
+			"type": "object",
+			"properties": {
+				"timings": {
+					"type": "array",
+					"title": "Временные метки в расписании",
+					"description": "Все элементы - строки, указывающие время\nПервый элемент - продолжительность пары, последующие - временные метки начала пары",
+					"minItems": 2,
+					"maxItems": 9,
+					"items": {
+						"$ref": "#/$defs/timing"
+					}
+				},
+				"uuid": {
+					"title": "UUID расписания",
+					"description": "Нужен для идентификации",
+					"$ref": "#/$defs/uuid"
+				},
+				"chat": {
+					"title": "Ссылка на основной чат",
+					"$ref": "#/$defs/link"
+				},
+				"name": {
+					"type": "string",
+					"title": "Имя расписания",
+					"minLength": 1,
+					"maxLength": 64
+				},
+				"starts-at-week": {
+					"type": "integer",
+					"title": "Начать с недели",
+					"description": "Номер недели, с которой начинается отсчёт расписания",
+					"minimum": 0,
+					"maximum": 53
+				}
+			},
+			"additionalProperties": false,
+			"required": [ "timings", "chat", "starts-at-week" ]
+		},
+		"subjects": {
+			"type": "object",
+			"title": "Предметы",
+			"description": "Общее описание всех предметов",
+			"propertyNames": {
+				"$ref": "#/$defs/id"
+			},
+			"additionalProperties": {
+				"$ref": "#/$defs/subject"
+			}
+		},
+		"weeks": {
+			"type": "object",
+			"title": "Именованные недели",
+			"propertyNames": {
+				"$ref": "#/$defs/id"
+			},
+			"additionalProperties": {
+				"$ref": "#/$defs/week"
+			}
+		},
+		"schedule": {
+			"type": "array",
+			"title": "Расписание (в неделях)",
+			"minItems": 1,
+			"items": {
+				"oneOf": [
+					{
+						"$ref": "#/$defs/week-ref"
+					},
+					{
+						"type": "object",
+						"$ref": "#/$defs/schedule-note"
+					}
+				]
+			}
+		}
+	},
+	"required": [ "subjects", "general", "schedule" ]
+}

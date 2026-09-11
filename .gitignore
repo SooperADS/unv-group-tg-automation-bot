@@ -1,0 +1,8 @@
+.venv/**
+.vscode/**
+
+config/*.json
+logs/*.log
+module/__pycache__/**
+
+token.txt
