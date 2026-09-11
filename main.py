@@ -1,6 +1,6 @@
 import io, logging
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from os import path
 from types import CoroutineType
 from typing import Any, Callable
@@ -43,9 +43,7 @@ RQ_LOG = LOG.getChild("requests")
 
 ### Loading configuration data ###
 
-MAIN_SCHEDULE = schedule.from_file(
-	path.join(CONFIG_DIR, SCHEDULE_FILE), RQ_LOG
-)
+MAIN_SCHEDULE = schedule.from_file(	path.join(CONFIG_DIR, SCHEDULE_FILE), RQ_LOG)
 
 ### Handlers ###
 
@@ -124,13 +122,13 @@ if __name__ == '__main__':
 	app_queue = app.job_queue
 
 	_on_today_cmd = schedule_message_command(
-		lambda s: pret.day_schedule(s)
+		lambda s: pret.day_schedule_msg(s, date.today())
 	)
 	_on_tomorrow_cmd = schedule_message_command(
-		lambda s: pret.day_schedule(s, datetime.now() + timedelta(1))
+		lambda s: pret.day_schedule_msg(s, datetime.now() + timedelta(1))
 	)
 	_on_now_cmd = schedule_message_command(
-		lambda s: pret.current_lesson(s, datetime.now())
+		lambda s: pret.now_msg(s, datetime.now())
 	)
 
 	app.add_handlers((
@@ -142,7 +140,7 @@ if __name__ == '__main__':
 		ext.CommandHandler(bot_commands[4].command, _on_now_cmd),
 		ext.CommandHandler(bot_commands[5].command, _on_now_cmd),
 		ext.CommandHandler(bot_commands[6].command, schedule_message_command(
-			lambda s: pret.week_schedule(s, s.current_week_index)
+			lambda s: pret.week_schedule_msg(s, s.current_week_index)
 		)),
 	))
 

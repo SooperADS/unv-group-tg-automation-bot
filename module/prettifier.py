@@ -1,48 +1,46 @@
-from collections.abc import Iterable
-from datetime import date, datetime, timedelta
-from module.schedule import Lesson, LessonKind, Schedule, SubjectExamKind, day_bounds
+import re
 
-def str_date(date: date | None = None) -> str:
-	return f"{date or datetime.now():%d.%m.%Y}".replace(".", "\\.")
+from datetime import date, datetime, time, timedelta
+from module.schedule import (
+	Lesson, LessonIndex,
+	LessonKind,
+	LessonNote,
+	Schedule,
+	ScheduleDayNote,
+	SubjectExamKind,
+	span_with_date
+)
 
-def str_lesson_time(schedule: Schedule, index: int) -> str:
-	s = schedule.get_lesson_time(index)
-	e = datetime.combine(datetime.today(), s) + schedule.lessons_duration
+# ==============================
+#  Simple text builders
+# ==============================
 
-	return f"{s:%H:%M} \\- {e:%H:%M}"
+def escape_unformatted(v: str) -> str:
+	return re.sub(r"([_\*\[(~`)\]>#+=\-|{}.!\\])", r"\\\1", v)
+def str_date(v: date | None = None) -> str:
+	return f"{v or date.today():%d.%m.%Y}".replace(".", "\\.")
+def str_time_span(span: tuple[time | datetime, time | datetime]) -> str:
+	return f"{span[0]:%H:%M} \\- {span[1]:%H:%M}"
+def str_lesson_time(lesson_index: int, schedule: Schedule) -> str:
+	return str_time_span(schedule.get_lesson_bounds(lesson_index))
+def str_chat_link(label: str, link: str) -> str:
+	return f"\\([{label}]({link})\\)"
 
-def weekday_name(iso_day: int) -> str:
-	match iso_day:
-		case 1: return "понедельник"
-		case 2: return "вторник"
-		case 3: return "среда"
-		case 4: return "четверг"
-		case 5: return "пятница"
-		case 6: return "суббота"
-		case 7: return "воскресенье"
+def weekday_name(index: int) -> str:
+	match index:
+		case 0: return "понедельник"
+		case 1: return "вторник"
+		case 2: return "среда"
+		case 3: return "четверг"
+		case 4: return "пятница"
+		case 5: return "суббота"
+		case 6: return "воскресенье"
 		case _: pass
 	return "?"
+def lesson_kind_name(lesson: LessonNote) -> str:
+	if lesson is None:
+		return "окно"
 
-def lesson_kind_dec(k: LessonKind) -> str | None:
-	match k:
-		case LessonKind.LECTURE: return '🔹'
-		case LessonKind.PRACTICE: return '🔸'
-		case LessonKind.CONSULTATION: return '🌀'
-		case _: return None
-
-def exam_kind_dec(k: SubjectExamKind) -> str | None:
-	match k:
-		case SubjectExamKind.SIMPLE: return '💠'
-		case SubjectExamKind.DIFF: return '⚠️'
-		case SubjectExamKind.FULL: return '🛑'
-		case SubjectExamKind.UNKNOWN: return '❔'
-	
-	return None # pyright: ignore[reportUnreachable]
-
-def lesson_dec(lesson: Lesson) -> str:
-	return f'{lesson_kind_dec(lesson.kind) or exam_kind_dec(lesson.subject.exam) or "\\#"}'
-
-def lesson_kind_name(lesson: Lesson) -> str:
 	match lesson.kind:
 		case LessonKind.LECTURE: return 'лекция'
 		case LessonKind.PRACTICE: return 'практика'
@@ -56,105 +54,134 @@ def lesson_kind_name(lesson: Lesson) -> str:
 		case SubjectExamKind.UNKNOWN: return 'неизвестно'
 	
 	return '\\#\\#\\#' # pyright: ignore[reportUnreachable]
-
-def _str_lesson_time(i: int, schedule: Schedule) -> str:
-	return f"{i + 1} пара \\[*{str_lesson_time(schedule, i)}*\\]"
-
-def str_lesson_in_place(lesson: Lesson, i: int, schedule: Schedule) -> str:
-	return (
-		f"{_str_lesson_time(i, schedule)} // {lesson_dec(lesson)} "
-		f"*{lesson_kind_name(lesson).upper()}* \\[{lesson.subject.name.replace("-", "\\-")}\\]"
-	)
-
-def str_lessons_list(
-	lessons: Iterable[Lesson | None], schedule: Schedule, *, str_none: bool = False
-) -> tuple[str, bool]:
-	all_has_chat, lines = True, []
-	for i, l in enumerate(lessons):
-		if l is not None:
-			chat = l.subject.get_chat(l.kind)
-
-			line = str_lesson_in_place(l, i, schedule)
-			if chat is not None and chat != schedule.main_chat:
-				line += f" [тут]({chat})"
-			else:
-				all_has_chat = False
-			
-			lines.append(line)
-		elif str_none:
-			lines.append(f"{_str_lesson_time(i, schedule)} // 🪟 *ОКНО*")
-	return "\n".join(lines), all_has_chat
-
-def day_schedule(schedule: Schedule, date: date | None = None, *, str_none: bool = True) -> str:
-	if date is None:
-		day, week = schedule.current_day, schedule.current_week_index
-	else:
-		index = schedule.get_day_index(date)
-		week = index.week
-		day = schedule.get_day(index)
-
-	if day is not None and len(day) >= 1 and day.count(None) != len(day):
-		text, all_has_chat = str_lessons_list(day, schedule, str_none=str_none)
-		if not all_has_chat:
-			text += (f"\n\n❗️ Пары, для которых не указанна ссылка, проходят в основной группе "
-				f"\\([тут]({schedule.main_chat})\\)")
-	else:		
-		text = "Пар нет"
+def lesson_kind_dec(k: LessonKind) -> str | None:
+	match k:
+		case LessonKind.LECTURE: return '🔹'
+		case LessonKind.PRACTICE: return '🔸'
+		case LessonKind.CONSULTATION: return '🌀'
+		case _: return None
+def exam_kind_dec(k: SubjectExamKind) -> str | None:
+	match k:
+		case SubjectExamKind.SIMPLE: return '💠'
+		case SubjectExamKind.DIFF: return '⚠️'
+		case SubjectExamKind.FULL: return '🛑'
+		case SubjectExamKind.UNKNOWN: return '❔'
 	
-	return f"📌 Расписание на *{str_date(date)}* \\[*{week + 1} неделя*\\]\n\n" + text
+	return None # pyright: ignore[reportUnreachable]
+def lesson_dec(lesson: LessonNote) -> str:
+	if lesson is None:
+		return '🪟'
+	return f'{lesson_kind_dec(lesson.kind) or exam_kind_dec(lesson.subject.exam) or "\\#"}'
 
-def week_schedule(schedule: Schedule, index: int, *, str_none: bool = True) -> str:
-	week = schedule.get_week(index)
-	if week is None:
-		return f"{index} неделя отсутствует в расписании"
+LAST_LESSON_MARKER = "*ПОСЛЕДНЯЯ*"
 
-	week_number = index + 1 + schedule.first_week
-	year, all_has_chat, text = date.today().year, True, f"📌 Расписание на *{index + 1} неделю*\n\n"
-	for i, day in enumerate(week.week):
-		if day is not None and len(day) >= 1 and day.count(None) != len(day):
-			day_text, ahc = str_lessons_list(day, schedule, str_none=str_none)
-			all_has_chat &= ahc
-		else:		
-			day_text = "Пар нет"
-		text += (f"◾️ {str_date(date.fromisocalendar(year, week_number, i + 1))} "
-			f"\\[*{weekday_name(i + 1)}*\\]\n{day_text}\n\n")
-	
-	if not all_has_chat:
-		text += (f"❗️ Пары, для которых не указанна ссылка, проходят в основной группе "
-			f"\\([тут]({schedule.main_chat})\\)")
+CURRENT_LESSON_PREFIX = "*СЕЙЧАС:*"
+NEXT_LESSON_PREFIX = "*СЛЕДУЮЩАЯ:*"
+AFTER_LESSON_PREFIX = "*ПОСЛЕ:*"
+
+# ==============================
+#  Text elements builders
+# ==============================
+
+def lesson_number_marker(lesson_index: int, schedule: Schedule) -> str:
+	return f"{lesson_index + 1} пара \\[*{str_lesson_time(lesson_index, schedule)}*\\]"
+def lesson_note_marker(lesson: LessonNote) -> str:
+	return f"{lesson_dec(lesson)} *{lesson_kind_name(lesson).upper()}*"
+def weekday_marker(v: date) -> str:
+	return f"{str_date(v)} \\[*{weekday_name(v.weekday())}*\\]"
+def day_marker(v: date) -> str:
+	return f"{str_date(v)} \\[*{v.isocalendar().week} неделя*\\]"
+
+def lesson_link(lesson: Lesson) -> str | None:
+	chat = lesson.specified_chat
+	return None if chat is None else str_chat_link("тут", chat)
+
+def scheduled_lesson(lesson: LessonNote, i: int, schedule: Schedule) -> str:
+	return (f"{lesson_number_marker(i, schedule)} // {lesson_note_marker(lesson)}" +
+		("" if lesson is None else f" \\[*{escape_unformatted(lesson.subject.name)}*\\]"))
+def scheduled_lesson_with_link(lesson: LessonNote, i: int, schedule: Schedule) -> str:
+	text = scheduled_lesson(lesson, i, schedule)
+	link = None if lesson is None else lesson_link(lesson)
+	return text if link is None else text + ' ' + link
+
+# ==============================
+#  Text blocks builders
+# ==============================
+
+def day_is_not_started_yet_note() -> str:
+	return "⚠️ Учебный день ещё не начался"
+def unspecified_chats_for_lessons_note(main_chat: str) -> str:
+	return (f"❗️ Пары, для которых не указанна ссылка, проходят в основной группе "
+		f"{str_chat_link('тут', main_chat)}")
+def day_lessons_list(day: ScheduleDayNote, schedule: Schedule) -> str:
+	if day is None or len(day.lessons) <= 0:
+		return "*Пар нет*"
+	return "\n".join(scheduled_lesson_with_link(
+		v, i, schedule
+	) for i, v in enumerate(day.lessons))
+
+# ==============================
+#  Message builders
+# ==============================
+
+def day_schedule_msg(schedule: Schedule, date: date):
+	day = schedule.get_day(schedule.to_day_index(date))
+	text = f"📌 Расписание пар на {day_marker(date)}\n\n{day_lessons_list(day, schedule)}"
+	if len(day.lessons) > 0 and not day.all_chat_specified:
+		text += f"\n\n{unspecified_chats_for_lessons_note(schedule.main_chat)}"
 
 	return text
 
-def current_lesson(schedule: Schedule, timestamp: datetime) -> str:
-	li = schedule.get_lesson_index(timestamp)
-	bounds = day_bounds(timestamp, schedule)
+def week_schedule_msg(schedule: Schedule, index: int) -> str:
+	week_obj = schedule.get_week(index)
+	text = f"📌 Расписание пар на *{index + 1} неделю*\n\n"
+	if week_obj is None:
+		return text + f"Неделя отсутствует в расписании"
 
-	if li.day_index is not None and bounds is not None:
-		lesson, j = schedule.always_get_lesson(li.day_part, li.day_index)
-		if lesson is not None:
-			prefix, next_prefix = "*СЕЙЧАС*: ", "*СЛЕДУЮЩАЯ*: "
-			nl, k = schedule.always_get_lesson(li.day_part, j + 1)
-			nl_str = None
-			lesson_str = str_lesson_in_place(lesson, j, schedule)
+	week = index + 1 + schedule.first_week
+	year, all_has_chat = date.today().year, True
+	for i, day in enumerate(week_obj.week):
+		text += (f"◾️ {weekday_marker(date.fromisocalendar(year, week, i + 1))}\n"
+			f"{day_lessons_list(day, schedule)}\n\n")
+		all_has_chat &= day.all_chat_specified
+	
+	if not all_has_chat:
+		text += f"\n\n{unspecified_chats_for_lessons_note(schedule.main_chat)}"
 
-			LAST_LESSON_MARKER = " *ПОСЛЕДНЯЯ*"
+	return text
 
-			if nl is not None:
-				nl_str = str_lesson_in_place(nl, k, schedule)
-				after_lesson, _ = schedule.always_get_lesson(li.day_part, k + 1)
-				if after_lesson is None:
-					nl_str += LAST_LESSON_MARKER
-			else:
-				lesson_str += LAST_LESSON_MARKER
+#TODO: refactor
+def now_msg(schedule: Schedule, timestamp: datetime) -> str:
+	li, irn = schedule.to_lesson_index(timestamp)
+	li = LessonIndex(li.day_index, 2)
+	day = schedule.get_day(li.day_index)
 
-			if not (li.is_right_now and li.day_index == j):
-				prefix, next_prefix = next_prefix, "*ПОСЛЕ*: "
-				if timestamp < bounds[0] - timedelta(hours=1):
-					prefix = "⚠️ Учебный день ещё не начался\n" + prefix
-			
-			return f"{prefix}{lesson_str}" + f"\n{next_prefix}{nl_str}" if nl_str is not None else ""
+	if day.bounds is None or day is None:
+		return "Сегодня пар нет"
 
-		if timestamp > bounds[1]:
-			return "Пары закончились"
+	assert li.lesson_index is not None #NOTE: That's assert can't fail
+	span = span_with_date(schedule.lessons_bounds_to_span(day.bounds))
 
-	return "Сегодня пар нет"
+	ls = day.fetch_lesson(li.lesson_index)
+	if ls is None:
+		assert timestamp > span[1] #NOTE: That's assert can't fail
+		return "Пары закончились"
+
+	ls_irn, text = irn and li.lesson_index == ls[1], ""
+	if not ls_irn and timestamp < span[0] - timedelta(hours=1):
+		text = f"{day_is_not_started_yet_note()}\n"
+
+	def _str_pair(v: tuple[Lesson, int]) -> str:
+		return f"{scheduled_lesson_with_link(v[0], v[1], schedule)}"
+
+	text += f"{CURRENT_LESSON_PREFIX if ls_irn else NEXT_LESSON_PREFIX} {_str_pair(ls)}"
+	next_ls = day.fetch_lesson(ls[1] + 1)
+	if next_ls is not None:
+		text += f"\n{NEXT_LESSON_PREFIX if ls_irn else AFTER_LESSON_PREFIX} {_str_pair(next_ls)}"
+		
+		if next_ls[1] >= day.bounds[1]:
+			text += f" {LAST_LESSON_MARKER}"
+	else:
+		text += f" {LAST_LESSON_MARKER}"
+	
+	return text

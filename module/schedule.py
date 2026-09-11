@@ -1,9 +1,115 @@
 import json, io, logging
 
+from collections.abc import Generator, Iterable
 from datetime import datetime, time, timedelta, date
 from dataclasses import dataclass, field
-from typing import Any, NamedTuple, final
+from typing import Any, NamedTuple, Never, final
 from enum import Enum
+from warnings import deprecated
+from itertools import repeat
+
+# ==============================
+#  Decode helpers
+# ==============================
+
+_STR_TYPE = "string"
+_DICT_TYPE = "object"
+_LIST_TYPE = "array"
+_INT_TYPE = "integer"
+_FLOAT_TYPE = "number"
+_NULL_TYPE = "null"
+_BOOL_TYPE = "boolean"
+
+type _Primitive = str | int | float | bool | list[Any] | dict[str, Any]
+type _At = str | None
+
+@final
+class DeserializationError(Exception):
+	def __init__(self, msg: str, at: _At) -> None:
+		super().__init__(f"{msg} at {at or '<root>'}")
+
+_PRIMITIVE_MAP = {
+	str: _STR_TYPE,
+	int: _INT_TYPE,
+	float: _FLOAT_TYPE,
+	list: _LIST_TYPE,
+	dict: _DICT_TYPE,
+	bool: _BOOL_TYPE
+}
+_AT_ROOT = None
+
+def _primitive_name(kind: type[_Primitive]) -> str:
+	return _PRIMITIVE_MAP.get(kind, "???")
+def _sub(at: str | None, k: str | int) -> str:
+	if isinstance(k, int):
+		return f"{at or ''}[{k}]"
+	elif at is not None:
+		return f"{at}.{k!r}"
+
+	return f"{k!r}"
+
+def _raise_unexpected_list_len(len: int, expected: str | int, at: _At) -> Never:
+	raise DeserializationError(f"List length {len}, expected {expected}", at)
+def _raise_unexpected_type(v: Any, at: _At, *expected: str) -> Never:
+	raise DeserializationError(f"Expected {" or ".join(expected)}, gotten {v!r}", at)
+def _raise_unknown_instance(v: Any, cls: type[Any], at: _At) -> Never:
+	raise DeserializationError(f"Unknown {cls.__name__} {v!r}", at)
+
+def _object_get_existed[K: _Primitive](
+	obj: dict[str, Any], t: type[K], key: str, at: _At, *, default: K | None = None
+) -> K:
+	if key not in obj:
+		raise DeserializationError(f"Expected key, but it doesn't exist", _sub(at, key))
+	
+	v: K | None = obj.get(key, default)
+	if not isinstance(v, t):
+		has_default = default is not None
+		if has_default and key in obj:
+			return default
+ 
+		_raise_unexpected_type(v, _sub(at, key), _primitive_name(t), *(
+			(_NULL_TYPE,) if has_default else ()
+		))
+	return v
+def _object_get_existed_enum[E: Enum](
+	obj: dict[str, Any], t: type[E], key: str, at: _At, *, default: E | None = None
+) -> E:
+	return decode_enum(_object_get_existed(
+		obj, str, key, at, default=None if default is None else default.name
+	), _sub(at, key), t)
+def _object_get_provided[K: _Primitive](
+	obj: dict[str, Any],
+	t: type[K],
+	key: str,
+	at: _At, *,
+	default: K | None = None,
+	allow_null: bool = False
+) -> K | None:
+	if key in obj:
+		v: K | None = obj.get(key)
+		if (not allow_null and v is None) or not isinstance(v, t):
+			_raise_unexpected_type(v, _sub(at, key), _primitive_name(t), *(
+				(_NULL_TYPE,) if allow_null else ()
+			))
+	else:
+		v = default
+
+	return v
+
+def decode_time_hm(src: Any, at: _At) -> tuple[int, int]:
+	if not isinstance(src, str):
+		_raise_unexpected_type(src, at, _STR_TYPE)
+
+	try:
+		v = time.strptime(src, "%H:%M")
+		return v.hour, v.minute
+	except ValueError:
+		raise DeserializationError(f"Invalid time: {src!r}", at)
+
+# ==============================
+#  Deserializable types and
+#  their decoders
+# ==============================
 
 class SubjectExamKind(Enum):
 	UNKNOWN = 0
@@ -11,46 +117,116 @@ class SubjectExamKind(Enum):
 	DIFF = 2
 	FULL = 3
 
-	@classmethod
-	def parse(cls, v: Any) -> SubjectExamKind:
-		return cls[v.upper()] if v in cls else cls.UNKNOWN
-	
 class LessonKind(Enum):
 	LECTURE = 1
 	PRACTICE = 2
 	CONSULTATION = 3
 	EXAM = 4
 
-	@classmethod
-	def parse(cls, v: Any) -> LessonKind:
-		return cls[str(v).upper()]
+def decode_enum[E: Enum](v: Any, at: _At, enum: type[E]) -> E:
+	if not isinstance(v, str):
+		_raise_unexpected_type(v, at, _STR_TYPE)
 
-@final
-class DeserializationError(Exception):
-	pass
+	v = v.upper()
+	if not hasattr(enum, v):
+		_raise_unknown_instance(v, enum, at)
+
+	return enum[v]
 
 @final
 class Lesson(NamedTuple):
 	subject: Subject
 	kind: LessonKind
 
-	@staticmethod
-	def parse(root: list[Any], schedule: Schedule) -> Lesson:
-		subject = schedule.get_subject_by_id(str(root[0]))
-		if subject is None:
-			raise DeserializationError(f'Unknown subject id: {root[0]!r}')
+	@property
+	def specified_chat(self) -> str | None:
+		return self.subject.get_chat(self.kind)
+
+type LessonNote = Lesson | None
+type Lessons = tuple[LessonNote, ...]
+type LessonsBounds = tuple[int, int]
+
+def _decode_lesson(list: list[Any], schedule: Schedule, at: _At) -> Lesson:
+	if len(list) != 2:
+		_raise_unexpected_list_len(len(list), 2, at)
+	
+	subject_id, lesson_kind = list[0], list[1]
+	if not isinstance(subject_id, str):
+		_raise_unexpected_type(subject_id, _sub(at, 0), _STR_TYPE)
+	
+	subject = schedule.get_subject_by_id(subject_id)
+	if subject is None:
+		_raise_unknown_instance(subject, Subject, _sub(at, 1))
+
+	return Lesson(subject, decode_enum(lesson_kind, _sub(at, 1), LessonKind))
+
+def get_lessons_bounds(lessons: Lessons, start: int) -> LessonsBounds | None:
+	first, last = None, None
+	for (i, note) in enumerate(lessons):
+		if note is not None:
+			if first is None or i <= start:
+				first = i
+			last = i
+	
+	if first is not None and last is not None:
+		return first, last
+	
+	return None
+	
+def is_chat_specified_for_all_lessons(lessons: Lessons) -> bool:
+	for l in lessons:
+		if l is not None and l.specified_chat is None:
+			return False
+	
+	return True
+
+@dataclass(frozen=True, slots=True, init=False)
+class ScheduleDay:
+	lessons: Lessons
+
+	bounds: LessonsBounds | None
+	all_chat_specified: bool
+
+	@property
+	def first_lesson(self) -> int | None:
+		return self.bounds[0] if self.bounds is not None else None
+	@property
+	def last_lesson(self) -> int | None:
+		return self.bounds[1] if self.bounds is not None else None
+
+	def __init__(self, lessons: Lessons):
+		object.__setattr__(self, "lessons", lessons)
+		object.__setattr__(self, "bounds", get_lessons_bounds(lessons, 0))
+		object.__setattr__(self, "all_chat_specified", is_chat_specified_for_all_lessons(lessons))
+
+	def get_lesson(self, index: int) -> LessonNote:
+		return self.lessons[index] if len(self.lessons) > index else None
+	def fetch_lesson(self, start: int) -> tuple[Lesson, int] | None:
+		while start < len(self.lessons):
+			current = self.lessons[start]
+			if current is not None:
+				return current, start
+			start += 1
 		
-		return Lesson(subject, LessonKind.parse(root[1]))
+		return None
 
-type ScheduleDay = tuple[Lesson | None, ...]
+def _decode_schedule_day(day: list[Any], schedule: Schedule, at: _At) -> ScheduleDay:
+	if len(day) < 1:
+		_raise_unexpected_list_len(len(day), ">= 1", at)
+
+	def _decode_item(i: int, v: Any) -> LessonNote:
+		if v is None:
+			return None
+		elif not isinstance(v, list):
+			_raise_unexpected_type(v, _sub(at, i), _LIST_TYPE, _NULL_TYPE)
+		return _decode_lesson(v, schedule, _sub(at, i))
+
+	return ScheduleDay(tuple((
+		_decode_item(i, v) for i, v in enumerate(day)
+	)))
+
 type ScheduleDayNote = ScheduleDay | None
-
-@final
-class ScheduleDayIndex(NamedTuple):
-	week: int
-	weekday: int
-
-type _Schedule_Week = tuple[
+type ScheduleWeekDays = tuple[
 	ScheduleDayNote, # пн
 	ScheduleDayNote, # вт
 	ScheduleDayNote, # ср
@@ -65,49 +241,82 @@ class ScheduleWeek:
 	schedule: Schedule = field(repr=False)
 
 	name: str | None
-	week: _Schedule_Week
+	week: ScheduleWeekDays
 
 	@property
-	def current_weekday(self) -> ScheduleDay | None:
-		return self.week[date.today().weekday()]
+	def current_weekday(self) -> ScheduleDayNote:
+		return self.get_day(date.today().weekday())
 	
-	def get_day(self, index: int) -> ScheduleDay | None:
-		return self.week[index] if index >= 0 and index <= 6 else None
+	def get_day(self, weekday: int) -> ScheduleDayNote:
+		return self.week[weekday] if weekday <= len(self.week) else None
+	def get_lesson(self, weekday: int, index: int) -> LessonNote:
+		day = self.get_day(weekday)
+		return day.get_lesson(index) if day is not None else None
 
-	@staticmethod
-	def _parse_day(root: list[Any], index: int, schedule: Schedule) -> ScheduleDayNote:
-		if len(root) <= index or root[index] is None:
+type ScheduleWeekNote = ScheduleWeek | None
+
+def _decode_week(week: list[Any], name: str | None, schedule: Schedule, at: _At) -> ScheduleWeek:
+	days = len(week)
+	if len(week) < 1:
+		_raise_unexpected_list_len(len(week), ">= 1", at)
+
+	def _decode_item(i: int) -> ScheduleDay | None:
+		if i >= days:
 			return None
-
-		return tuple(((
-			Lesson.parse(v, schedule) if v is not None else v
-		) for v in root[index] if isinstance(v, list) or v is None))
-
-	@classmethod
-	def parse(cls, root: list[Any], key: str | None, schedule: Schedule) -> ScheduleWeek:
-		return ScheduleWeek(schedule, key, (
-			cls._parse_day(root, 0, schedule),
-			cls._parse_day(root, 1, schedule),
-			cls._parse_day(root, 2, schedule),
-			cls._parse_day(root, 3, schedule),
-			cls._parse_day(root, 4, schedule),
-			cls._parse_day(root, 5, schedule),
-		))
-
-	@classmethod
-	def parse_ref_or_def(cls, root: Any, schedule: Schedule) -> ScheduleWeek | None:
-		if isinstance(root, str):
-			w = schedule.get_week_by_name(root)
-			if w is None:
-				raise DeserializationError(f'No weak with name {root!r} found')
-			
-			return w
-		elif isinstance(root, list):
-			return cls.parse(root, None, schedule)
-		elif root is None:
+		
+		v = week[i]
+		if v is None:
 			return None
-		else:
-			raise DeserializationError(f'Invalid week reference or definition: {root!r}')
+		elif not isinstance(v, list):
+			_raise_unexpected_type(v, _sub(at, i), _LIST_TYPE, _NULL_TYPE)
+		return _decode_schedule_day(v, schedule, _sub(at, i))
+
+	return ScheduleWeek(schedule, name, (
+		_decode_item(0),
+		_decode_item(1),
+		_decode_item(2),
+		_decode_item(3),
+		_decode_item(4),
+		_decode_item(5),
+	))
+
+def _raw_decode_week_ref(ref: str | None, schedule: Schedule, at: _At) -> ScheduleWeekNote:
+	if ref is None:
+		return None
+
+	w = schedule.get_week_by_name(ref)
+	if w is None:
+		_raise_unknown_instance(w, ScheduleWeek, at)
+	return w
+def _decode_week_ref_or_def(week: Any, schedule: Schedule, at: _At) -> ScheduleWeekNote:
+	if isinstance(week, str) or week is None:
+		return _raw_decode_week_ref(week, schedule, at)
+	elif isinstance(week, list):
+		return _decode_week(week, None, schedule, at)
+
+	raise _raise_unexpected_type(week, at, _STR_TYPE, _LIST_TYPE, _NULL_TYPE)
+
+def _decode_scheduled_week(week: Any, schedule: Schedule, at: _At) -> Iterable[ScheduleWeekNote]:
+	if isinstance(week, str) or week is None:
+		return (_raw_decode_week_ref(week, schedule, at),)
+	elif isinstance(week, list):
+		return (_decode_week(week, None, schedule, at),)
+	elif isinstance(week, dict):
+		pattern = _object_get_existed(week, list, "pattern", at)
+		count = _object_get_existed(week, int, "count", at)
+
+		if count < 0:
+			count = 0 #TODO: raise an error
+
+		def _result_gen() -> Generator[ScheduleWeekNote, Any, None]:
+			for i, rod in enumerate(pattern):
+				v = _decode_week_ref_or_def(rod, schedule, _sub(at, i))
+				for r in repeat(v, count):
+					yield r
+		
+		return _result_gen()
+
+	raise _raise_unexpected_type(week, at, _LIST_TYPE, _STR_TYPE, _DICT_TYPE, _NULL_TYPE)
 
 @dataclass(frozen=True, slots=True)
 class Subject:
@@ -130,133 +339,86 @@ class Subject:
 			result = self.practice_chat
 		
 		return result or self.main_chat
+
+def _decode_subject(subject: dict[str, Any], id: str, schedule: Schedule, at: _At) -> Subject:
+	name = _object_get_existed(subject, str, "name", at)
+	tag = _object_get_existed(subject, str, "tag", at)
+	exam = _object_get_existed_enum(
+		subject, SubjectExamKind, "exam", at, default=SubjectExamKind.UNKNOWN
+	)
 	
-	@staticmethod
-	def parse(root: dict[Any, Any], key: str, schedule: Schedule) -> Subject:
-		str_key=f'"subjects".{key!r}.{{0!r}}'
+	chat = subject.get("chat")
+	mc, lc, pc = None, None, None
 
-		name = _get_existed_key(root, str, "name", "string", str_key=str_key)
-		tag = _get_existed_key(root, str, "tag", "string", str_key=str_key)
-		exam_s = _get_nullable_key(root, str, "exam", "string", str_key=str_key)
-		exam = SubjectExamKind.parse(exam_s)
-		
-		chat = root.get("chat")
-		main_chat, lecture_chat, practice_chat = None, None, None
+	if isinstance(chat, dict):
+		mc = _object_get_provided(subject, str, "main", at, allow_null=True)
+		lc = _object_get_provided(subject, str, "lecture", at, allow_null=True)
+		pc = _object_get_provided(subject, str, "practice", at, allow_null=True)
+	elif isinstance(chat, str):
+		mc, lc, pc = chat, chat, chat
 
-		if isinstance(chat, dict):
-			def _to_link(v: Any) -> str | None:
-				return v if isinstance(v, str) else None
-
-			main_chat = _to_link(chat.get("main"))
-			lecture_chat = _to_link(chat.get("lecture"))
-			practice_chat = _to_link(chat.get("practice"))
-		elif isinstance(chat, str):
-			main_chat, lecture_chat, practice_chat = chat, chat, chat
-
-		return Subject(schedule, name, tag, key, exam, main_chat, lecture_chat, practice_chat)
-
-def _parse_time(time: str) -> tuple[int, int]:
-	if len(time) < 4 or len(time) > 5:
-		raise DeserializationError(f'Invalid time string length for {time!r}')
-
-	h, _ , m = time.partition(":")
-	r = (int(h), int(m))
-
-	if r[0] < 0 or r[0] >= 24 or r[1] < 0 or r[1] >= 60:
-		raise DeserializationError(f'Invalid time: {r[0]:02d}:{r[1]:02d}')
-
-	return r
-
-def _check_key_exists(root: dict[Any, Any], key: str, /, *, str_key: str = "{0!r}"):
-	if key not in root:
-		raise DeserializationError(f'{str_key} MUST exist'.format(key))
-def _get_existed_key[T](
-	root: dict[Any, Any], t: type[T], key: str, s: str, /, *, str_key: str = "{0!r}"
-) -> T:
-	_check_key_exists(root, key, str_key=str_key)
+	return Subject(schedule, name, tag, id, exam, mc, lc, pc)
 	
-	v: T | None = root.get(key)
-	if not isinstance(v, t):
-		raise DeserializationError(f'{str_key} MUST be {s}'.format(key))
-	
-	return v
-def _get_nullable_key[T](
-	root: dict[Any, Any],
-	t: type[T],
-	key: str, 
-	s: str, /, *, 
-	str_key: str = "{1!r}", 
-	prevent_null: bool = False
-) -> T | None:	
-	v: T | None = root.get(key)
-	if (prevent_null and key in root and v is None) or (not isinstance(v, t) and v is not None):
-		msg = f'{str_key} MUST be {s} '
-		if not prevent_null:
-			msg += "or null "
-		raise DeserializationError(msg + "or not exist".format(key))
-	
-	return v
+# ==============================
+#  Schedule class and their
+#  helpers
+# ==============================
+
+type TimeSpan = tuple[time, time]
+type DateTimeSpan = tuple[datetime, datetime]
+
+@final
+class ScheduleDayIndex(NamedTuple):
+	week: int
+	weekday: int
+
+	def extend(self, lesson_index: int | None = None) -> LessonIndex:
+		return LessonIndex(self, lesson_index)
+
+@final
+class LessonIndex(NamedTuple):
+	day_index: ScheduleDayIndex
+	lesson_index: int | None
+
+	@property
+	def week(self) -> int:
+		return self.day_index.week
+
+	@property
+	def weekday(self) -> int:
+		return self.day_index.weekday
+
+def _timedelta_as_time(v: timedelta) -> time:
+	return time((v.seconds // 3600) % 24, (v.seconds // 60) % 60)
 
 def current_week() -> int:
 	return date.today().isocalendar().week - 1
 
-@final
-class LessonIndex(NamedTuple):
-	day_index: int | None
-	is_right_now: bool
-
-EMPTY_LESSON_INDEX = LessonIndex(None, False)
-
-@final
-class FullLessonIndex(NamedTuple):
-	lesson_part: LessonIndex	
-	day_part: ScheduleDayIndex
-
-	@property
-	def week(self) -> int:
-		return self.day_part.week
-	@property
-	def weekday(self) -> int:
-		return self.day_part.weekday
-	@property
-	def day_index(self) -> int | None:
-		return self.lesson_part.day_index
-	@property
-	def is_right_now(self) -> bool:
-		return self.lesson_part.is_right_now
-
-	def to_next_lesson(self, schedule: Schedule) -> FullLessonIndex:
-		day_index = self.day_index
-		if day_index is not None:
-			mx, day_index = schedule.max_lessons_count, day_index + 1
-			while day_index < mx:
-				if schedule.get_lesson(self.day_part, day_index) is not None:
-					return FullLessonIndex(
-						LessonIndex(day_index, False), self.day_part
-					)
-				day_index += 1
-	
-		return FullLessonIndex(EMPTY_LESSON_INDEX, self.day_part)
-
+def span_with_date(span: TimeSpan, d: date | None = None) -> DateTimeSpan:
+	d = d or date.today()
+	return datetime.combine(d, span[0]), datetime.combine(d, span[1])
 
 @dataclass(slots=True)
 class Schedule:
 	_subject_registry: dict[str, Subject]
 	_subject_tags: dict[str, Subject]
 	_named_weeks: dict[str, ScheduleWeek]
-	_schedule: list[ScheduleWeek | None]
+	_schedule: tuple[ScheduleWeekNote, ...]
 
-	_sorted_timings: list[time]
+	_sorted_timings: tuple[timedelta, ...]
 	_lessons_duration: timedelta
 
 	_name: str | None = None
 	_chat_link: str = ""
+
+	#TODO: replace with year + week tuple or something else
 	_lessons_start: int = 0
 
 	@property
 	def main_chat(self) -> str:
 		return self._chat_link
 	@property
+	@deprecated("Invalid starting point representation. Need to be rewritten")
 	def first_week(self) -> int:
 		return self._lessons_start
 	@property
@@ -267,55 +429,56 @@ class Schedule:
 	def lessons_duration(self) -> timedelta:
 		return self._lessons_duration
 	@property
-	def max_lessons_count(self) -> int:
+	def max_lessons(self) -> int:
 		return len(self._sorted_timings)
 
 	@property
 	def current_week_index(self) -> int:
 		return current_week() - self._lessons_start
 	@property
-	def current_lesson_index(self) -> FullLessonIndex:
-		return self.get_lesson_index(datetime.now())
+	def current_week(self) -> ScheduleWeekNote:
+		return self.get_week(self.current_week_index)
+	
 	@property
 	def current_day_index(self) -> ScheduleDayIndex:
-		return self.get_day_index(date.today())
-
+		return self.to_day_index(date.today())
 	@property
 	def current_day(self) -> ScheduleDayNote:
 		return self.get_day(self.current_day_index)
-	@property
-	def current_lesson(self) -> Lesson | None:
-		l, d = self.current_lesson_index
-		return self.get_lesson(d, l.day_index) if l.day_index else None
 
-	def __init__(self, root: dict[Any, Any], logger: logging.Logger | None = None) -> None:
+	@property
+	def current_lesson_index(self) -> LessonIndex:
+		return self.to_lesson_index(datetime.now())[0]
+	@property
+	def current_lesson(self) -> LessonNote:
+		return self.get_lesson(self.current_lesson_index)
+
+	def __init__(self, root: dict[Any, Any]) -> None:
 		self._subject_registry = dict()
 		self._subject_tags = dict()
 		self._named_weeks = dict()
-		self._schedule = list()
-
-		self._sorted_timings = list()
+		
+		self._schedule = ()
+		self._sorted_timings = ()
 		self._lessons_duration = timedelta()
+		self.load(root)
 
-		self.load(root, logger)
+	def load_general(self, root: dict[str, Any]):
+		AT = _sub(_AT_ROOT, "general")
 
-	def load_general(self, root: dict[Any, Any]):
-		str_key='"general".{0!r}'
-		chat_link = _get_existed_key(root, str, "chat", "string", str_key=str_key)
-		name = _get_nullable_key(root, str, "name", "string", str_key=str_key)
-		timings = _get_existed_key(root, list, "timings", "array", str_key=str_key)
-		lessons_starts = _get_existed_key(root, int, "starts-at-week", "integer", str_key=str_key)
+		chat_link = _object_get_existed(root, str, "chat", AT)
+		name = _object_get_provided(root, str, "name", AT, allow_null=True)
+		timings = _object_get_existed(root, list, "timings", AT)
+		lessons_starts = _object_get_existed(root, int, "starts-at-week", AT)
 
 		if len(timings) < 2:
-			raise DeserializationError('"general"."timings" too short')
+			_raise_unexpected_list_len(len(timings), ">= 1", AT)
 		elif lessons_starts < 0 or lessons_starts >= 54:
-			lessons_starts = 0
+			lessons_starts = 0 #TODO: raise an error
 
 		stamps: list[tuple[int, int]] = list()
-		for stamp in timings:
-			if not isinstance(stamp, str):
-				raise DeserializationError(f'Expected string, gotten {stamp!r}')
-			stamps.append(_parse_time(stamp))
+		for i, stamp in enumerate(timings):
+			stamps.append(decode_time_hm(stamp, _sub(AT, i)))
 		
 		self._lessons_start = lessons_starts
 		self._chat_link = chat_link
@@ -324,134 +487,97 @@ class Schedule:
 		duration = stamps.pop(0)
 		self._lessons_duration = timedelta(hours=duration[0], minutes=duration[1])
 
-		self._sorted_timings.clear()
-		for v in stamps:
-			self._sorted_timings.append(time(hour=v[0], minute=v[1]))
+		stamps.sort()
+		self._sorted_timings = tuple((
+			timedelta(hours=v[0], minutes=v[1]) for v in stamps
+		))
+	def load_schedule(self, root: list[Any]):
+		AT = _sub(_AT_ROOT, "general")
+
+		def _repetition_unpack(schedule: Schedule) -> Generator[ScheduleWeekNote, Any, None]:
+			for i, week in enumerate(root):
+				for v in _decode_scheduled_week(week, schedule, _sub(AT, i)):
+					yield v
+		self._schedule = tuple(_repetition_unpack(self))
+	def load(self, root: dict[str, Any]):
+		general: dict[str, Any] = _object_get_existed(root, dict, "general", _AT_ROOT)
+		subjects: dict[str, Any] = _object_get_existed(root, dict, "subjects", _AT_ROOT)
+		schedule = _object_get_existed(root, list, "schedule", _AT_ROOT)
+		weeks: dict[str, Any] | None = _object_get_provided(root, dict, "weeks", _AT_ROOT)
+
+		self._subject_registry.clear()
+		self._subject_tags.clear()
+		self._named_weeks.clear()
+
+		AT_SUBJECTS = _sub(_AT_ROOT, "subjects")
+		for k, v in subjects.items():
+			at = _sub(AT_SUBJECTS, k)
+			if not isinstance(v, dict):
+				_raise_unexpected_type(v, at, _DICT_TYPE)
+
+			s = _decode_subject(v, k, self, at)
+			self._subject_registry[k] = s
+			self._subject_tags[s.tag] = s
+
+		AT_WEEKS = _sub(_AT_ROOT, "weeks")
+		if weeks is not None:
+			for k, v in weeks.items():
+				at = _sub(AT_WEEKS, k)
+				if not isinstance(v, list):
+					_raise_unexpected_type(v, at, _DICT_TYPE)
+				self._named_weeks[k] = _decode_week(v, k, self, at)
 		
-		self._sorted_timings.sort()
-	def load_schedule(self, schedule_root: list[Any]):
-		self._schedule.clear()
-
-		for v in schedule_root:
-			if isinstance(v, dict):
-				l = v.get("pattern")
-				if not isinstance(l, list):
-					raise DeserializationError(f'Invalid week pattern: {l!r}')
-
-				count = v.get("count")
-				if not isinstance(count, int) or count <= 0:
-					raise DeserializationError(f'Expected integer > 0, gotten: {count!r}')
-
-				w: list[ScheduleWeek | None] = list()
-				for rod in l:
-					w.append(ScheduleWeek.parse_ref_or_def(rod, self))
-
-				for _ in range(count):
-					self._schedule.extend(w)
-			else:
-				self._schedule.append(ScheduleWeek.parse_ref_or_def(v, self))
+		self.load_general(general)
+		self.load_schedule(schedule)
 
 	def get_subject_by_id(self, id: str) -> Subject | None:
 		return self._subject_registry.get(id)
 	def get_subject_by_tag(self, tag: str) -> Subject | None:
 		return self._subject_tags.get(tag)
-	def get_week_by_name(self, name: str) -> ScheduleWeek | None:
+	def get_week_by_name(self, name: str) -> ScheduleWeekNote:
 		return self._named_weeks.get(name)
-	def get_week(self, index: int) -> ScheduleWeek | None:
+	
+	def get_week(self, index: int) -> ScheduleWeekNote:
 		return self._schedule[index] if index >= 0 and len(self._schedule) > index else None
+	def get_day(self, index: ScheduleDayIndex) -> ScheduleDayNote:
+		week = self.get_week(index.week)
+		return None if week is None else week.get_day(index.weekday)
+	def get_lesson(self, index: LessonIndex) -> LessonNote:
+		if index.lesson_index is not None:
+			day = self.get_day(index.day_index)
+			if day is not None: 
+				return day.get_lesson(index.lesson_index)
+		return None
 
-	def get_day_index(self, date: date) -> ScheduleDayIndex:
+	def get_lesson_timestamp(self, n: int) -> timedelta:
+		return self._sorted_timings[n]
+	def get_lesson_bounds(self, n: int) -> TimeSpan:
+		start = self.get_lesson_timestamp(n)
+		return _timedelta_as_time(start), _timedelta_as_time(start + self._lessons_duration)
+
+	def lessons_bounds_to_span(self, bounds: LessonsBounds) -> TimeSpan:
+		return (_timedelta_as_time(self.get_lesson_timestamp(bounds[0])),
+			 _timedelta_as_time(self.get_lesson_timestamp(bounds[1]) + self._lessons_duration))
+
+	#TODO: from_day_index, from_lesson_index
+
+	def to_day_index(self, date: date) -> ScheduleDayIndex:
 		iso = date.isocalendar()
 		return ScheduleDayIndex(iso.week - 1 - self._lessons_start, iso.weekday - 1)
-	def get_lesson_index(self, timestamp: datetime) -> FullLessonIndex:
+	def to_lesson_index(self, timestamp: datetime) -> tuple[LessonIndex, bool]:
 		today, d = datetime.today(), self._lessons_duration
-		di, irn = EMPTY_LESSON_INDEX
+		di, irn = None, False
 		for i, stamp in enumerate(self._sorted_timings):
-			v = datetime.combine(today, stamp)
+			v = today + stamp
 			if timestamp <= v + d:
 				di, irn = i, timestamp >= v
 				break
 
-		return FullLessonIndex(
-			LessonIndex(di, irn),
-			self.get_day_index(timestamp)
-		)
-	def get_lesson_time(self, i: int) -> time:
-		return self._sorted_timings[i]
+		return self.to_day_index(timestamp).extend(di), irn
 
-	def get_day(self, index: ScheduleDayIndex) -> ScheduleDayNote:
-		w = self.get_week(index.week)
-		return w.get_day(index.weekday) if w is not None else None
-	def get_lesson(self, i: ScheduleDayIndex, j: int) -> Lesson | None:
-		d = self.get_day(i)
-		return d[j] if d is not None and d and len(d) > j and j >= 0 else None
-
-	def always_get_lesson(self, i: ScheduleDayIndex, j: int) -> tuple[Lesson | None, int]:
-		d = self.get_day(i)
-		if d is not None and j >= 0:
-			while j < len(d):
-				l = d[j]
-				if l is not None:
-					return l, j
-				j += 1
-
-		return None, j
-
-	def load(self, root: dict[Any, Any], logger: logging.Logger | None = None):
-		general = _get_existed_key(root, dict, "general", "object")
-		subjects = _get_existed_key(root, dict, "subjects", "object")
-		schedule = _get_existed_key(root, list, "schedule", "array")
-
-		weeks = _get_nullable_key(
-			root, dict, "weeks", "object", prevent_null=True
-		)
-
-		self._subject_registry.clear()
-		self._subject_tags.clear()
-		self._named_weeks.clear()
-		self._schedule.clear()
-
-		for k, v in subjects.items():
-			if isinstance(k, str) and isinstance(v, dict):
-				subject = Subject.parse(v, k, self)
-				self._subject_registry[k] = subject
-				self._subject_tags[subject.tag] = subject
-
-		if weeks is not None:
-			for k, v in weeks.items():
-				if isinstance(k, str) and isinstance(v, list):
-					self._named_weeks[k] = ScheduleWeek.parse(v, k, self)
-		
-		self.load_general(general)
-		self.load_schedule(schedule)
-
-		if logger is not None and logger.level >= logging.DEBUG:
-			logger.debug(f"{self}")
-
-	def get_day_bounds(self, date: date) -> tuple[int, int] | None:
-		d = self.get_day(self.get_day_index(date))
-		if d is not None:
-			f, l = None, None
-			for (i, ls) in enumerate(d):
-				if ls is not None:
-					if f is None:
-						f = i
-					l = i
-			
-			if f is not None and l is not None:
-				return f, l
-
-		return None
-
-def day_bounds(date: date, schedule: Schedule) -> tuple[datetime, datetime] | None:
-	b = schedule.get_day_bounds(date)
-	if b is not None:
-		return (
-			datetime.combine(date, schedule.get_lesson_time(b[0])),
-			datetime.combine(date, schedule.get_lesson_time(b[1])) + schedule.lessons_duration,
-		)
-
-	return None
+# ==============================
+#  Global initialization helpers
+# ==============================
 
 def _load_root_from_file(src: str) -> dict[Any, Any]:
 	with io.open(src, "r") as sch:
@@ -459,13 +585,13 @@ def _load_root_from_file(src: str) -> dict[Any, Any]:
 		if isinstance(root, dict):
 			return root
 
-	raise DeserializationError("Root MUST be object")
+		_raise_unexpected_type(root, _AT_ROOT, _DICT_TYPE)
 
 def from_file(src: str, logger: logging.Logger | None) -> Schedule:
 	if logger is not None:
 		logger.info("Load schedule configuration")
 	
-	r = Schedule(_load_root_from_file(src), logger)
+	r = Schedule(_load_root_from_file(src))
 	if logger is not None:
 		logger.info("Schedule configuration loaded successfully")
 
