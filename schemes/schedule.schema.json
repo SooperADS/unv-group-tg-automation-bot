@@ -173,14 +173,40 @@
 			"type": "object",
 			"properties": {
 				"timings": {
-					"type": "array",
+					"type": "object",
 					"title": "Временные метки в расписании",
-					"description": "Все элементы - строки, указывающие время\nПервый элемент - продолжительность пары, последующие - временные метки начала пары",
-					"minItems": 2,
-					"maxItems": 9,
-					"items": {
-						"$ref": "#/$defs/timing"
-					}
+					"description": "Указывает дату и время событий и точек отсчёта",
+					"properties": {
+						"lessons": {
+							"type": "array",
+							"title": "Временные метки начала пар",
+							"minItems": 1,
+							"maxItems": 16,
+							"items": {
+								"$ref": "#/$defs/timing"
+							}
+						},
+						"lesson-duration": {
+							"title": "Продолжительность пары",
+							"$ref": "#/$defs/timing"
+						},
+						"first-week": {
+							"type": "integer",
+							"title": "Начать расписание с недели",
+							"description": "Номер недели, с которой начинается отсчёт расписания (отсчёт с 0)",
+							"minimum": 0,
+							"maximum": 52
+						},
+						"first-year": {
+							"type": "integer",
+							"title": "Год",
+							"description": "Номер года, с которой начинается отсчёт расписания",
+							"minimum": 2025,
+							"maximum": 2100
+						}
+					},
+					"additionalProperties": false,
+					"required": [ "lessons", "lesson-duration", "first-week", "first-year" ]
 				},
 				"uuid": {
 					"title": "UUID расписания",
@@ -196,17 +222,10 @@
 					"title": "Имя расписания",
 					"minLength": 1,
 					"maxLength": 64
-				},
-				"starts-at-week": {
-					"type": "integer",
-					"title": "Начать с недели",
-					"description": "Номер недели, с которой начинается отсчёт расписания",
-					"minimum": 0,
-					"maximum": 53
 				}
 			},
 			"additionalProperties": false,
-			"required": [ "timings", "chat", "starts-at-week" ]
+			"required": [ "timings", "chat" ]
 		},
 		"subjects": {
 			"type": "object",

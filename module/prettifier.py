@@ -1,14 +1,10 @@
 import re
 
-from datetime import date, datetime, time, timedelta
+from datetime import date, datetime, time
 from module.schedule import (
-	Lesson, LessonIndex,
-	LessonKind,
-	LessonNote,
-	Schedule,
-	ScheduleDayNote,
-	SubjectExamKind,
-	span_with_date
+	Lesson, LessonIndex, Schedule, ScheduleDayIndex,
+	LessonNote, ScheduleDayNote,
+	LessonKind, SubjectExamKind
 )
 
 # ==============================
@@ -49,7 +45,7 @@ def lesson_kind_name(lesson: LessonNote) -> str:
 	
 	match lesson.subject.exam:
 		case SubjectExamKind.SIMPLE: return 'зачёт'
-		case SubjectExamKind.DIFF: return 'дифф-зачёт'
+		case SubjectExamKind.DIFF: return 'диф-зачёт'
 		case SubjectExamKind.FULL: return 'экзамен'
 		case SubjectExamKind.UNKNOWN: return 'неизвестно'
 	
@@ -89,8 +85,9 @@ def lesson_note_marker(lesson: LessonNote) -> str:
 	return f"{lesson_dec(lesson)} *{lesson_kind_name(lesson).upper()}*"
 def weekday_marker(v: date) -> str:
 	return f"{str_date(v)} \\[*{weekday_name(v.weekday())}*\\]"
-def day_marker(v: date) -> str:
-	return f"{str_date(v)} \\[*{v.isocalendar().week} неделя*\\]"
+def day_marker(day_index: ScheduleDayIndex, schedule: Schedule) -> str:
+	date = schedule.to_date(day_index)
+	return f"{str_date(date)} \\[*{day_index.week + 1} неделя*\\]"
 
 def lesson_link(lesson: Lesson) -> str | None:
 	chat = lesson.specified_chat
@@ -124,10 +121,10 @@ def day_lessons_list(day: ScheduleDayNote, schedule: Schedule) -> str:
 #  Message builders
 # ==============================
 
-def day_schedule_msg(schedule: Schedule, date: date):
-	day = schedule.get_day(schedule.to_day_index(date))
-	text = f"📌 Расписание пар на {day_marker(date)}\n\n{day_lessons_list(day, schedule)}"
-	if len(day.lessons) > 0 and not day.all_chat_specified:
+def day_schedule_msg(schedule: Schedule, day_index: ScheduleDayIndex):
+	day, day_date = schedule.get_day(day_index), day_marker(day_index, schedule)
+	text = f"📌 Расписание пар на {day_date}\n\n{day_lessons_list(day, schedule)}"
+	if day is not None and len(day.lessons) > 0 and not day.all_chat_specified:
 		text += f"\n\n{unspecified_chats_for_lessons_note(schedule.main_chat)}"
 
 	return text
@@ -136,52 +133,43 @@ def week_schedule_msg(schedule: Schedule, index: int) -> str:
 	week_obj = schedule.get_week(index)
 	text = f"📌 Расписание пар на *{index + 1} неделю*\n\n"
 	if week_obj is None:
-		return text + f"Неделя отсутствует в расписании"
+		return text + f"⚠️ Неделя отсутствует в расписании"
 
-	week = index + 1 + schedule.first_week
-	year, all_has_chat = date.today().year, True
+	all_has_chat = True
+	year, week = schedule.to_iso_year_and_week(index)
 	for i, day in enumerate(week_obj.week):
+		text += '\n\n' if i != 0 else ''
 		text += (f"◾️ {weekday_marker(date.fromisocalendar(year, week, i + 1))}\n"
-			f"{day_lessons_list(day, schedule)}\n\n")
-		all_has_chat &= day.all_chat_specified
+			f"{day_lessons_list(day, schedule)}")
+
+		if day is not None:
+			all_has_chat &= day.all_chat_specified
 	
 	if not all_has_chat:
 		text += f"\n\n{unspecified_chats_for_lessons_note(schedule.main_chat)}"
 
 	return text
 
-#TODO: refactor
-def now_msg(schedule: Schedule, timestamp: datetime) -> str:
-	li, irn = schedule.to_lesson_index(timestamp)
-	li = LessonIndex(li.day_index, 2)
+def now_msg(schedule: Schedule, li: LessonIndex, is_right_now: bool) -> str:
 	day = schedule.get_day(li.day_index)
-
-	if day.bounds is None or day is None:
+	if day is None or day.bounds is None:
 		return "Сегодня пар нет"
 
 	assert li.lesson_index is not None #NOTE: That's assert can't fail
-	span = span_with_date(schedule.lessons_bounds_to_span(day.bounds))
-
 	ls = day.fetch_lesson(li.lesson_index)
 	if ls is None:
-		assert timestamp > span[1] #NOTE: That's assert can't fail
 		return "Пары закончились"
 
-	ls_irn, text = irn and li.lesson_index == ls[1], ""
-	if not ls_irn and timestamp < span[0] - timedelta(hours=1):
-		text = f"{day_is_not_started_yet_note()}\n"
+	ls_irn = is_right_now and li.lesson_index == ls[1]
+	text = f"{CURRENT_LESSON_PREFIX if ls_irn else NEXT_LESSON_PREFIX} "
+	text += scheduled_lesson_with_link(ls[0], ls[1], schedule)
 
-	def _str_pair(v: tuple[Lesson, int]) -> str:
-		return f"{scheduled_lesson_with_link(v[0], v[1], schedule)}"
-
-	text += f"{CURRENT_LESSON_PREFIX if ls_irn else NEXT_LESSON_PREFIX} {_str_pair(ls)}"
 	next_ls = day.fetch_lesson(ls[1] + 1)
 	if next_ls is not None:
-		text += f"\n{NEXT_LESSON_PREFIX if ls_irn else AFTER_LESSON_PREFIX} {_str_pair(next_ls)}"
+		text += f"\n{NEXT_LESSON_PREFIX if ls_irn else AFTER_LESSON_PREFIX} "
+		text += scheduled_lesson_with_link(next_ls[0], next_ls[1], schedule)
 		
-		if next_ls[1] >= day.bounds[1]:
-			text += f" {LAST_LESSON_MARKER}"
-	else:
+	if next_ls is None or next_ls[1] >= day.bounds[1]:
 		text += f" {LAST_LESSON_MARKER}"
-	
+
 	return text

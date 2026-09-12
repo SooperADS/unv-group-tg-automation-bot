@@ -1,6 +1,6 @@
 import io, logging
 
-from datetime import date, datetime, timedelta
+from datetime import datetime
 from os import path
 from types import CoroutineType
 from typing import Any, Callable
@@ -13,13 +13,19 @@ import module.schedule as schedule
 import module.prettifier as pret
 from module.consts import *
 
-### Setup ###
+# ==============================
+#  Read from TOKEN_FILE
+# ==============================
 
 TOKEN: str = None # pyright: ignore[reportAssignmentType]
 with io.open(TOKEN_FILE, "r") as file:
 	TOKEN = file.readline() # pyright: ignore[reportConstantRedefinition]
 if type(TOKEN) is not str:
 	raise Exception("No Telegram bot token provided")
+
+# ==============================
+#  Setup the logging
+# ==============================
 
 logging.basicConfig(
 	level=logging.INFO,
@@ -31,8 +37,6 @@ logging.basicConfig(
 	)
 )
 
-### Logging setup ###
-
 LOG = logging.getLogger("bot")
 logging.getLogger("httpx").setLevel(logging.ERROR)
 logging.getLogger("asyncio").setLevel(logging.WARN)
@@ -41,11 +45,9 @@ logging.getLogger("apscheduler").setLevel(logging.WARN)
 RQ_LOG = LOG.getChild("requests")
 # RQ_LOG.setLevel(logging.DEBUG)
 
-### Loading configuration data ###
-
-MAIN_SCHEDULE = schedule.from_file(	path.join(CONFIG_DIR, SCHEDULE_FILE), RQ_LOG)
-
-### Handlers ###
+# ==============================
+#  Handlers
+# ==============================
 
 type _Command_Callback = Callable[
 	[tg.Update, ext.ContextTypes.DEFAULT_TYPE], CoroutineType[Any, Any, Any]
@@ -115,20 +117,24 @@ bot_commands = (
 	tg.BotCommand("schedule", "Публикует текущее расписание"),
 )
 
-### MAIN ####
+# ==============================
+#  MAIN
+# ==============================
+
+MAIN_SCHEDULE = schedule.Schedule(None)
 
 if __name__ == '__main__':
 	app = ext.ApplicationBuilder().token(TOKEN).build()
 	app_queue = app.job_queue
 
 	_on_today_cmd = schedule_message_command(
-		lambda s: pret.day_schedule_msg(s, date.today())
+		lambda s: pret.day_schedule_msg(s, s.current_day_index)
 	)
 	_on_tomorrow_cmd = schedule_message_command(
-		lambda s: pret.day_schedule_msg(s, datetime.now() + timedelta(1))
+		lambda s: pret.day_schedule_msg(s, s.current_day_index.add_days(1))
 	)
 	_on_now_cmd = schedule_message_command(
-		lambda s: pret.now_msg(s, datetime.now())
+		lambda s: pret.now_msg(s, *s.to_lesson_index(datetime.now()))
 	)
 
 	app.add_handlers((
@@ -145,6 +151,10 @@ if __name__ == '__main__':
 	))
 
 	async def _app_post_init(_):
+		schedule.reload_schedule(
+			MAIN_SCHEDULE, path.join(CONFIG_DIR, SCHEDULE_FILE), RQ_LOG
+		)
+
 		success = await app.bot.set_my_commands(
 			bot_commands, tg.BotCommandScopeAllGroupChats(),
 		)

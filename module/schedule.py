@@ -1,12 +1,11 @@
 import json, io, logging
 
-from collections.abc import Generator, Iterable
 from datetime import datetime, time, timedelta, date
-from dataclasses import dataclass, field
 from typing import Any, NamedTuple, Never, final
-from enum import Enum
-from warnings import deprecated
+from collections.abc import Generator, Iterable
+from dataclasses import dataclass, field
 from itertools import repeat
+from enum import Enum
 
 # ==============================
 #  Decode helpers
@@ -96,7 +95,11 @@ def _object_get_provided[K: _Primitive](
 
 	return v
 
-def decode_time_hm(src: Any, at: _At) -> tuple[int, int]:
+def _check_int_range(v: int, min: int | None, max: int | None, at: _At):
+	if (min is not None and v < min) or (max is not None and v > max):
+		range_text = f"[{'-inf' if min is None else min}; {'+inf' if max is None else max}]"
+		raise DeserializationError(f"Expected integer in {range_text}", at)
+def _decode_time_hm(src: Any, at: _At) -> tuple[int, int]:
 	if not isinstance(src, str):
 		_raise_unexpected_type(src, at, _STR_TYPE)
 
@@ -248,7 +251,7 @@ class ScheduleWeek:
 		return self.get_day(date.today().weekday())
 	
 	def get_day(self, weekday: int) -> ScheduleDayNote:
-		return self.week[weekday] if weekday <= len(self.week) else None
+		return self.week[weekday] if weekday < len(self.week) else None
 	def get_lesson(self, weekday: int, index: int) -> LessonNote:
 		day = self.get_day(weekday)
 		return day.get_lesson(index) if day is not None else None
@@ -305,9 +308,7 @@ def _decode_scheduled_week(week: Any, schedule: Schedule, at: _At) -> Iterable[S
 		pattern = _object_get_existed(week, list, "pattern", at)
 		count = _object_get_existed(week, int, "count", at)
 
-		if count < 0:
-			count = 0 #TODO: raise an error
-
+		_check_int_range(count, 0, None, _sub(at, "count"))
 		def _result_gen() -> Generator[ScheduleWeekNote, Any, None]:
 			for i, rod in enumerate(pattern):
 				v = _decode_week_ref_or_def(rod, schedule, _sub(at, i))
@@ -372,8 +373,16 @@ class ScheduleDayIndex(NamedTuple):
 	week: int
 	weekday: int
 
+	@property
+	def is_valid(self) -> bool:
+		return self.weekday >= 0 and self.weekday <= 6
+
 	def extend(self, lesson_index: int | None = None) -> LessonIndex:
 		return LessonIndex(self, lesson_index)
+	def add_days(self, count: int) -> ScheduleDayIndex:
+		nw = self.weekday + count
+		w = nw // 7 + self.week
+		return ScheduleDayIndex(w, nw % 7)
 
 @final
 class LessonIndex(NamedTuple):
@@ -381,18 +390,24 @@ class LessonIndex(NamedTuple):
 	lesson_index: int | None
 
 	@property
+	def is_valid(self) -> bool:
+		return self.day_index.is_valid >= 0 and (
+			self.lesson_index is None or self.lesson_index >= 0
+		)
+
+	@property
 	def week(self) -> int:
 		return self.day_index.week
-
 	@property
 	def weekday(self) -> int:
 		return self.day_index.weekday
 
-def _timedelta_as_time(v: timedelta) -> time:
+def timedelta_as_time(v: timedelta) -> time:
 	return time((v.seconds // 3600) % 24, (v.seconds // 60) % 60)
-
-def current_week() -> int:
-	return date.today().isocalendar().week - 1
+def weeks_for_year(year: int) -> int:
+    return date(year, 12, 28).isocalendar().week
+def day_starting_point(day: date) -> datetime:
+	return datetime.combine(day, time())
 
 def span_with_date(span: TimeSpan, d: date | None = None) -> DateTimeSpan:
 	d = d or date.today()
@@ -410,17 +425,19 @@ class Schedule:
 
 	_name: str | None = None
 	_chat_link: str = ""
+	_first_week: int = 0
+	_first_year: int = 0
 
-	#TODO: replace with year + week tuple or something else
-	_lessons_start: int = 0
+	@property
+	def first_week(self) -> int:
+		return self._first_week
+	@property
+	def first_year(self) -> int:
+		return self._first_year
 
 	@property
 	def main_chat(self) -> str:
 		return self._chat_link
-	@property
-	@deprecated("Invalid starting point representation. Need to be rewritten")
-	def first_week(self) -> int:
-		return self._lessons_start
 	@property
 	def name(self) -> str | None:
 		return self._name
@@ -434,7 +451,15 @@ class Schedule:
 
 	@property
 	def current_week_index(self) -> int:
-		return current_week() - self._lessons_start
+		# NEED_CHECK: Maybe incorrect algorithm
+		iso = date.today().isocalendar()
+		w, y = iso.week, iso.year
+
+		while y > self._first_year + 1:
+			y -= 1
+			w += weeks_for_year(y)
+
+		return w - self._first_week - 1
 	@property
 	def current_week(self) -> ScheduleWeekNote:
 		return self.get_week(self.current_week_index)
@@ -453,7 +478,7 @@ class Schedule:
 	def current_lesson(self) -> LessonNote:
 		return self.get_lesson(self.current_lesson_index)
 
-	def __init__(self, root: dict[Any, Any]) -> None:
+	def __init__(self, root: dict[Any, Any] | None) -> None:
 		self._subject_registry = dict()
 		self._subject_tags = dict()
 		self._named_weeks = dict()
@@ -461,36 +486,47 @@ class Schedule:
 		self._schedule = ()
 		self._sorted_timings = ()
 		self._lessons_duration = timedelta()
-		self.load(root)
+		if root is not None:
+			self.load(root)
 
 	def load_general(self, root: dict[str, Any]):
 		AT = _sub(_AT_ROOT, "general")
 
+		### LOAD ROOTS ###
 		chat_link = _object_get_existed(root, str, "chat", AT)
 		name = _object_get_provided(root, str, "name", AT, allow_null=True)
-		timings = _object_get_existed(root, list, "timings", AT)
-		lessons_starts = _object_get_existed(root, int, "starts-at-week", AT)
+		timings = _object_get_existed(root, dict, "timings", AT)
 
-		if len(timings) < 2:
-			_raise_unexpected_list_len(len(timings), ">= 1", AT)
-		elif lessons_starts < 0 or lessons_starts >= 54:
-			lessons_starts = 0 #TODO: raise an error
-
-		stamps: list[tuple[int, int]] = list()
-		for i, stamp in enumerate(timings):
-			stamps.append(decode_time_hm(stamp, _sub(AT, i)))
+		### LOAD TIMINGS OBJECT ###
+		AT_TIMINGS = _sub(_AT_ROOT, "timings")
+		lessons = _object_get_existed(timings, list, "lessons", AT_TIMINGS)
+		lesson_d = _object_get_existed(timings, str, "lesson-duration", AT_TIMINGS)
+		first_w = _object_get_existed(timings, int, "first-week", AT_TIMINGS)
+		first_y = _object_get_existed(timings, int, "first-year", AT_TIMINGS)
 		
-		self._lessons_start = lessons_starts
-		self._chat_link = chat_link
-		self._name = name
-
-		duration = stamps.pop(0)
-		self._lessons_duration = timedelta(hours=duration[0], minutes=duration[1])
+		_check_int_range(first_w, 0, 52, _sub(AT_TIMINGS, "first-week"))
+		_check_int_range(first_y, 2000, 2100, _sub(AT_TIMINGS, "first-year"))
+	
+		if len(lessons) < 1:
+			_raise_unexpected_list_len(len(lessons), ">= 1", AT)
+		
+		stamps: list[tuple[int, int]] = list()
+		for i, stamp in enumerate(lessons):
+			stamps.append(_decode_time_hm(stamp, _sub(AT, i)))
 
 		stamps.sort()
+		d = _decode_time_hm(lesson_d, _sub(AT_TIMINGS, "lesson-duration"))
+
+		### SETUP ###
+		self._lessons_duration = timedelta(hours=d[0], minutes=d[1])
 		self._sorted_timings = tuple((
 			timedelta(hours=v[0], minutes=v[1]) for v in stamps
 		))
+
+		self._name = name
+		self._chat_link = chat_link
+		self._first_week = first_w
+		self._first_year = first_y
 	def load_schedule(self, root: list[Any]):
 		AT = _sub(_AT_ROOT, "general")
 
@@ -500,11 +536,13 @@ class Schedule:
 					yield v
 		self._schedule = tuple(_repetition_unpack(self))
 	def load(self, root: dict[str, Any]):
+		### LOAD ROOTS ###
 		general: dict[str, Any] = _object_get_existed(root, dict, "general", _AT_ROOT)
 		subjects: dict[str, Any] = _object_get_existed(root, dict, "subjects", _AT_ROOT)
 		schedule = _object_get_existed(root, list, "schedule", _AT_ROOT)
 		weeks: dict[str, Any] | None = _object_get_provided(root, dict, "weeks", _AT_ROOT)
 
+		### SETUP ###
 		self._subject_registry.clear()
 		self._subject_tags.clear()
 		self._named_weeks.clear()
@@ -553,19 +591,17 @@ class Schedule:
 		return self._sorted_timings[n]
 	def get_lesson_bounds(self, n: int) -> TimeSpan:
 		start = self.get_lesson_timestamp(n)
-		return _timedelta_as_time(start), _timedelta_as_time(start + self._lessons_duration)
+		return timedelta_as_time(start), timedelta_as_time(start + self._lessons_duration)
 
 	def lessons_bounds_to_span(self, bounds: LessonsBounds) -> TimeSpan:
-		return (_timedelta_as_time(self.get_lesson_timestamp(bounds[0])),
-			 _timedelta_as_time(self.get_lesson_timestamp(bounds[1]) + self._lessons_duration))
-
-	#TODO: from_day_index, from_lesson_index
+		return (timedelta_as_time(self.get_lesson_timestamp(bounds[0])),
+			 timedelta_as_time(self.get_lesson_timestamp(bounds[1]) + self._lessons_duration))
 
 	def to_day_index(self, date: date) -> ScheduleDayIndex:
 		iso = date.isocalendar()
-		return ScheduleDayIndex(iso.week - 1 - self._lessons_start, iso.weekday - 1)
+		return ScheduleDayIndex(iso.week - 1 - self._first_week, iso.weekday - 1)
 	def to_lesson_index(self, timestamp: datetime) -> tuple[LessonIndex, bool]:
-		today, d = datetime.today(), self._lessons_duration
+		today, d = day_starting_point(date.today()), self._lessons_duration
 		di, irn = None, False
 		for i, stamp in enumerate(self._sorted_timings):
 			v = today + stamp
@@ -574,6 +610,19 @@ class Schedule:
 				break
 
 		return self.to_day_index(timestamp).extend(di), irn
+	
+	def to_iso_year_and_week(self, week_index: int) -> tuple[int, int]:
+		# NEED_CHECK:
+		m = 1 if week_index >= 0 else -1
+		yrd, wfy = 0, weeks_for_year(self.first_year)
+		while week_index >= wfy:
+			yrd += m
+			week_index -= wfy * m
+		
+		return self.first_year + yrd, self.first_week + week_index + 1
+	def to_date(self, index: ScheduleDayIndex) -> date:
+		y, w = self.to_iso_year_and_week(index.week)
+		return date.fromisocalendar(y, w, index.weekday + 1)
 
 # ==============================
 #  Global initialization helpers

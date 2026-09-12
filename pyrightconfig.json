@@ -4,6 +4,6 @@
 	"reportUnknownMemberType": "none",
 	"reportUnknownVariableType": "none",
 	"reportUnknownArgumentType": "none",
-	"reportOptionalMemberAccess": "none",
+	"reportOptionalMemberAccess": "hint",
 	"reportAny": "none"
 }
