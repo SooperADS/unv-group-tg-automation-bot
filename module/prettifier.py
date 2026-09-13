@@ -218,7 +218,7 @@ def help_msg(commands: CommandSet, in_group: bool) -> str:
 				"Ответ публичный, сообщение с командой от пользователя удаляется ботом", "post", '!'
 			), 
 			command_flags("Ответ отправляется без звука", "silent", 's'),
-			command_flags("То же, что и `silent !`", "silent", "s!")
+			command_flags("То же, что и `silent !`", "silent!", "s!")
 		))
 
 		text += ("\n\n❗️ Эти флаги работают только в групповых чатах\\."
