@@ -128,7 +128,6 @@ def day_schedule_msg(schedule: Schedule, day_index: ScheduleDayIndex):
 		text += f"\n\n{unspecified_chats_for_lessons_note(schedule.main_chat)}"
 
 	return text
-
 def week_schedule_msg(schedule: Schedule, index: int) -> str:
 	week_obj = schedule.get_week(index)
 	text = f"📌 Расписание пар на *{index + 1} неделю*\n\n"
@@ -149,7 +148,6 @@ def week_schedule_msg(schedule: Schedule, index: int) -> str:
 		text += f"\n\n{unspecified_chats_for_lessons_note(schedule.main_chat)}"
 
 	return text
-
 def now_msg(schedule: Schedule, li: LessonIndex, is_right_now: bool) -> str:
 	day = schedule.get_day(li.day_index)
 	if day is None or day.bounds is None:
