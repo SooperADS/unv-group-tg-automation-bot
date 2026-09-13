@@ -47,6 +47,7 @@ if __name__ == '__main__':
 		h.make_handler(h.now_cmd_h, h.NOW_CMD, block=False),
 		h.make_handler(h.schedule_cmd_h, h.SCHEDULE_CMD, block=False),
 		h.make_handler(h.help_cmd_h, h.HELP_CMD, block=False),
+		h.make_handler(h.subjects_cmd_h, h.SUBJECTS_CMD, block=False),
 	))
 
 	async def _app_post_init(_):

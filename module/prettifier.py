@@ -2,7 +2,7 @@ import re
 
 from datetime import date, datetime, time
 from module.schedule import (
-	Lesson, LessonIndex, Schedule, ScheduleDayIndex,
+	Lesson, LessonIndex, Schedule, ScheduleDayIndex, Subject,
 	LessonNote, ScheduleDayNote,
 	LessonKind, SubjectExamKind
 )
@@ -33,6 +33,14 @@ def weekday_name(index: int) -> str:
 		case 6: return "воскресенье"
 		case _: pass
 	return "?"
+def exam_kind_name(kind: SubjectExamKind) -> str:
+	match kind:
+		case SubjectExamKind.SIMPLE: return 'зачёт'
+		case SubjectExamKind.DIFF: return 'диф-зачёт'
+		case SubjectExamKind.FULL: return 'экзамен'
+		case SubjectExamKind.UNKNOWN: return 'неизвестно'
+
+	return '\\#\\#\\#' # pyright: ignore[reportUnreachable]
 def lesson_kind_name(lesson: LessonNote) -> str:
 	if lesson is None:
 		return "окно"
@@ -43,13 +51,8 @@ def lesson_kind_name(lesson: LessonNote) -> str:
 		case LessonKind.CONSULTATION: return 'консультация'
 		case _: pass
 	
-	match lesson.subject.exam:
-		case SubjectExamKind.SIMPLE: return 'зачёт'
-		case SubjectExamKind.DIFF: return 'диф-зачёт'
-		case SubjectExamKind.FULL: return 'экзамен'
-		case SubjectExamKind.UNKNOWN: return 'неизвестно'
+	return exam_kind_name(lesson.subject.exam)
 	
-	return '\\#\\#\\#' # pyright: ignore[reportUnreachable]
 def lesson_kind_dec(k: LessonKind) -> str | None:
 	match k:
 		case LessonKind.LECTURE: return '🔹'
@@ -102,6 +105,9 @@ def scheduled_lesson_with_link(lesson: LessonNote, i: int, schedule: Schedule) -
 	return text if link is None else text + ' ' + link
 
 type CommandArgs = dict[str, str | None] | None
+type CommandInfo = tuple[str, CommandArgs]
+type CommandSet = dict[str, CommandInfo]
+
 def command_with_args(cmd: str, args: CommandArgs) -> str:
 	text = f"/{cmd}"
 	if args is not None:
@@ -129,6 +135,12 @@ def day_lessons_list(day: ScheduleDayNote, schedule: Schedule) -> str:
 	return "\n".join(scheduled_lesson_with_link(
 		v, i, schedule
 	) for i, v in enumerate(day.lessons))
+
+def subject_info(subject: Subject, id: str) -> str:
+	exam = subject.exam
+	return (f"*{escape_unformatted(subject.name)}* \\[\\#{escape_unformatted(subject.tag)}\\]:\n"
+		f"Форма экзамена: {exam_kind_dec(exam)} *{exam_kind_name(exam).upper()}*\n"
+		f"ID в реестре: `{escape_unformatted(id)}`")
 
 # ==============================
 #  Message builders
@@ -185,8 +197,14 @@ def now_msg(schedule: Schedule, li: LessonIndex, is_right_now: bool) -> str:
 
 	return text
 
-type CommandInfo = tuple[str, CommandArgs]
-type CommandSet = dict[str, CommandInfo]
+def subjects_msg(schedule: Schedule) -> str:
+	infix = '' if schedule.name is None else f"*{escape_unformatted(schedule.name)}* //"
+	text = f"📚 {infix}Предметы:"
+
+	for id, subject in schedule.get_subjects():
+		text += f"\n\n📄 {subject_info(subject, id)}"
+
+	return text
 def help_msg(commands: CommandSet, in_group: bool) -> str:
 	text = "🧰 Помощь по командам бота:\n\n" + '\n'.join(command_info(
 		c, escape_unformatted(info[0]), info[1]
@@ -200,7 +218,7 @@ def help_msg(commands: CommandSet, in_group: bool) -> str:
 				"Ответ публичный, сообщение с командой от пользователя удаляется ботом", "post", '!'
 			), 
 			command_flags("Ответ отправляется без звука", "silent", 's'),
-			command_flags("То же, что и `post !`", "post!")
+			command_flags("То же, что и `silent !`", "silent", "s!")
 		))
 
 		text += ("\n\n❗️ Эти флаги работают только в групповых чатах\\."

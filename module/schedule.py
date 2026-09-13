@@ -570,6 +570,8 @@ class Schedule:
 		return self._subject_registry.get(id)
 	def get_subject_by_tag(self, tag: str) -> Subject | None:
 		return self._subject_tags.get(tag)
+	def get_subjects(self) -> Iterable[tuple[str, Subject]]:
+		return self._subject_registry.items()
 	def get_week_by_name(self, name: str) -> ScheduleWeekNote:
 		return self._named_weeks.get(name)
 	

@@ -49,7 +49,7 @@ class InGroupCommandFlags(NamedTuple):
 			post = "post" in args or "!" in args
 			s = 's' in args or "silent" in args
 
-			if "post!" in args:
+			if "silent!" in args or "s!" in args:
 				post, s = True, True
 		
 		return InGroupCommandFlags(post, s)
@@ -70,25 +70,33 @@ SCHEDULE_CMD: _Cmd = ("schedule", "Публикует текущее распи�
 	"offset": "int"
 })
 HELP_CMD: _Cmd = ("help", "Помощь по командам", None)
+SUBJECTS_CMD: _Cmd = ("subjects", "Информация о предметах", None)
+
+# PUBLISH_CMD: _Cmd = ("publish", "Публикует сообщение по предмету", {
+# 	"subject": "tag"
+# })
 
 GLOBAL_CMDS: _Cmd_Group = (
+	to_command(HELP_CMD, True),
+	to_command(SUBJECTS_CMD, True),
 	to_command(TODAY_CMD, True),
 	to_command(TOMORROW_CMD, True),
 	to_command(NOW_CMD, True),
 	to_command(SCHEDULE_CMD, True),
-	to_command(HELP_CMD, True)
 )
 PRIVATE_CMDS: _Cmd_Group = (
+	to_command(HELP_CMD),
+	to_command(SUBJECTS_CMD),
 	to_command(TODAY_CMD),
 	to_command(TOMORROW_CMD),
 	to_command(NOW_CMD),
 	to_command(SCHEDULE_CMD),
-	to_command(HELP_CMD),
 )
 DEFAULT_CMDS: _Cmd_Group = GLOBAL_CMDS
 
 GROUP_COMMAND_SET = to_command_set(
 	HELP_CMD,
+	SUBJECTS_CMD,
 	TODAY_CMD,
 	TOMORROW_CMD,
 	NOW_CMD,
@@ -96,6 +104,7 @@ GROUP_COMMAND_SET = to_command_set(
 )
 PRIVATE_COMMAND_SET = to_command_set(
 	HELP_CMD,
+	SUBJECTS_CMD,
 	TODAY_CMD,
 	TOMORROW_CMD,
 	NOW_CMD,
@@ -212,6 +221,13 @@ async def schedule_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
 	offset = _extract_arg(ctx.args, int, 0, 0)
 	await _send_message(msg, *await _handle_cmd_generic_args(msg, user, u, ctx), (
 		pret.week_schedule_msg(s, s.current_week_index + offset)
+	))
+async def subjects_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
+	msg, user = _deconstruct_update(u)
+
+	s = MAIN_SCHEDULE
+	await _send_message(msg, *await _handle_cmd_generic_args(msg, user, u, ctx), (
+		pret.subjects_msg(s)
 	))
 
 async def help_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
