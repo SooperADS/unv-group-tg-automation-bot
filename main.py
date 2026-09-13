@@ -46,6 +46,7 @@ if __name__ == '__main__':
 		h.make_handler(h.tomorrow_cmd_h, h.TOMORROW_CMD, block=False),
 		h.make_handler(h.now_cmd_h, h.NOW_CMD, block=False),
 		h.make_handler(h.schedule_cmd_h, h.SCHEDULE_CMD, block=False),
+		h.make_handler(h.help_cmd_h, h.HELP_CMD, block=False),
 	))
 
 	async def _app_post_init(_):
@@ -58,8 +59,6 @@ if __name__ == '__main__':
 		if not success:
 			LOG.error("Bot command initialization failed")
 			return await app.shutdown()
-
-		LOG.info(f"Bot commands: {await app.bot.get_my_commands()}")
 
 	async def _app_post_stop(_):
 		await h.remove_commands(app.bot)

@@ -1,5 +1,4 @@
 from collections.abc import Callable
-from enum import Enum
 from types import CoroutineType
 from typing import Any, NamedTuple, final
 from datetime import datetime
@@ -16,7 +15,7 @@ import module.schedule as sc
 #  Helpers
 # ==============================
 
-type _Cmd = tuple[str, str]
+type _Cmd = tuple[str, str, pret.CommandArgs]
 type _Cmd_Group = tuple[tg.BotCommand, ...]
 type _Cmd_Handler = ext.CommandHandler[ext.ContextTypes.DEFAULT_TYPE, Any]
 type _Cmd_Callback = Callable[
@@ -35,28 +34,25 @@ def to_command(v: _Cmd, is_ephemeral: bool = False) -> tg.BotCommand:
 		v[0], v[1], api_kwargs=EPHEMERAL_CMD_KWARGS if is_ephemeral else None
 	)
 
-class CommandRequestKind(Enum):
-	POST = 1
-	PUBLIC = 2
-	ANSWER = 3
-	pass
+def to_command_set(*commands: _Cmd) -> pret.CommandSet:
+	return dict((v[0], (v[1], v[2])) for v in commands)
 
 @final
 class InGroupCommandFlags(NamedTuple):
-	request: CommandRequestKind
+	post: bool
 	silent: bool
 
 	@staticmethod
 	def extract(args: list[str] | None) -> InGroupCommandFlags:
-		rq, s = CommandRequestKind.ANSWER, False
+		post, s = False, False
 		if args is not None:
-			if "post" in args:
-				rq = CommandRequestKind.POST
-			elif "pub" in args:
-				rq = CommandRequestKind.PUBLIC
+			post = "post" in args or "!" in args
 			s = 's' in args or "silent" in args
+
+			if "post!" in args:
+				post, s = True, True
 		
-		return InGroupCommandFlags(rq, s)
+		return InGroupCommandFlags(post, s)
 
 def chat_type_is_group(type: str | tgc.ChatType) -> bool:
 	return (type == tgc.ChatType.GROUP
@@ -67,11 +63,13 @@ def chat_type_is_group(type: str | tgc.ChatType) -> bool:
 #  Commands
 # ==============================
 
-TODAY_CMD: _Cmd = ("today", "Текущие расписание на сегодня")
-TOMORROW_CMD: _Cmd = ("tomorrow", "Текущие расписание на завтра")
-NOW_CMD: _Cmd = ("now", "Текущая/следующая пара")
-SCHEDULE_CMD: _Cmd = ("schedule", "Публикует текущее расписание")
-HELP_CMD: _Cmd = ("help", "Помощь по командам")
+TODAY_CMD: _Cmd = ("today", "Текущие расписание на сегодня", None)
+TOMORROW_CMD: _Cmd = ("tomorrow", "Текущие расписание на завтра", None)
+NOW_CMD: _Cmd = ("now", "Текущая/следующая пара", None)
+SCHEDULE_CMD: _Cmd = ("schedule", "Публикует текущее расписание", {
+	"offset": "int"
+})
+HELP_CMD: _Cmd = ("help", "Помощь по командам", None)
 
 GLOBAL_CMDS: _Cmd_Group = (
 	to_command(TODAY_CMD, True),
@@ -89,12 +87,26 @@ PRIVATE_CMDS: _Cmd_Group = (
 )
 DEFAULT_CMDS: _Cmd_Group = GLOBAL_CMDS
 
+GROUP_COMMAND_SET = to_command_set(
+	HELP_CMD,
+	TODAY_CMD,
+	TOMORROW_CMD,
+	NOW_CMD,
+	SCHEDULE_CMD
+)
+PRIVATE_COMMAND_SET = to_command_set(
+	HELP_CMD,
+	TODAY_CMD,
+	TOMORROW_CMD,
+	NOW_CMD,
+	SCHEDULE_CMD
+)
+
 async def registry_commands(bot: tg.Bot) -> bool:
 	return (await bot.set_my_commands(GLOBAL_CMDS, CMD_SCOPE_GROUPS)
 		and await bot.set_my_commands(GLOBAL_CMDS, CMD_SCOPE_ADMINS)
 		and await bot.set_my_commands(PRIVATE_CMDS, CMD_SCOPE_PRIVATE)
 		and await bot.set_my_commands(DEFAULT_CMDS))
-
 async def remove_commands(bot: tg.Bot) -> bool:
 	return (await bot.delete_my_commands(CMD_SCOPE_GROUPS)
 		and await bot.delete_my_commands(CMD_SCOPE_ADMINS)
@@ -140,15 +152,14 @@ async def _handle_cmd_generic_args(
 	ephemeral_message_id: int | None = msg.api_kwargs.get("ephemeral_message_id")
 	if chat_type_is_group(msg.chat.type):
 		flags = InGroupCommandFlags.extract(ctx.args)
-		if flags.request == CommandRequestKind.POST:
+		if flags.post:
 			if ephemeral_message_id is None:
 				ctx.application.create_task(msg.delete(), u)
-		elif flags.request == CommandRequestKind.ANSWER:
-			if ephemeral_message_id is None:
-				reply = tg.ReplyParameters(msg.id, msg.chat.id)
-			else:
-				reply = _ephemeral_reply(ephemeral_message_id)
-				kwargs = _ephemeral_api_kwargs(user.id)
+		elif ephemeral_message_id is None:
+			reply = tg.ReplyParameters(msg.id, msg.chat.id)
+		else:
+			reply = _ephemeral_reply(ephemeral_message_id)
+			kwargs = _ephemeral_api_kwargs(user.id)
 
 		silent = flags.silent
 
@@ -201,4 +212,14 @@ async def schedule_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
 	offset = _extract_arg(ctx.args, int, 0, 0)
 	await _send_message(msg, *await _handle_cmd_generic_args(msg, user, u, ctx), (
 		pret.week_schedule_msg(s, s.current_week_index + offset)
+	))
+
+async def help_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
+	msg, user = _deconstruct_update(u)
+
+	is_group = chat_type_is_group(msg.chat.type)
+	cs = GROUP_COMMAND_SET if is_group else PRIVATE_COMMAND_SET
+
+	await _send_message(msg, *await _handle_cmd_generic_args(msg, user, u, ctx), (
+		pret.help_msg(cs, is_group)
 	))

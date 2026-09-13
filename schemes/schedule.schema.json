@@ -208,11 +208,6 @@
 					"additionalProperties": false,
 					"required": [ "lessons", "lesson-duration", "first-week", "first-year" ]
 				},
-				"uuid": {
-					"title": "UUID расписания",
-					"description": "Нужен для идентификации",
-					"$ref": "#/$defs/uuid"
-				},
 				"chat": {
 					"title": "Ссылка на основной чат",
 					"$ref": "#/$defs/link"

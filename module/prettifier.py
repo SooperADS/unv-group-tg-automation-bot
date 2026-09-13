@@ -101,6 +101,17 @@ def scheduled_lesson_with_link(lesson: LessonNote, i: int, schedule: Schedule) -
 	link = None if lesson is None else lesson_link(lesson)
 	return text if link is None else text + ' ' + link
 
+type CommandArgs = dict[str, str | None] | None
+def command_with_args(cmd: str, args: CommandArgs) -> str:
+	text = f"/{cmd}"
+	if args is not None:
+		for k, v in args.items():
+			text += f" <`{k}`{'' if v is None else f': {v}'}\\>"
+
+	return text
+def command_flags(formatted_description: str, /, *names: str) -> str:
+	return " или ".join(f"`{v}`" for v in names) + f" – {formatted_description}"
+
 # ==============================
 #  Text blocks builders
 # ==============================
@@ -110,6 +121,8 @@ def day_is_not_started_yet_note() -> str:
 def unspecified_chats_for_lessons_note(main_chat: str) -> str:
 	return (f"❗️ Пары, для которых не указанна ссылка, проходят в основной группе "
 		f"{str_chat_link('тут', main_chat)}")
+def command_info(cmd: str, description: str, args: CommandArgs) -> str:
+	return f"{command_with_args(cmd, args)} – {escape_unformatted(description)}"
 def day_lessons_list(day: ScheduleDayNote, schedule: Schedule) -> str:
 	if day is None or len(day.lessons) <= 0:
 		return "*Пар нет*"
@@ -170,4 +183,26 @@ def now_msg(schedule: Schedule, li: LessonIndex, is_right_now: bool) -> str:
 	if next_ls is None or next_ls[1] >= day.bounds[1]:
 		text += f" {LAST_LESSON_MARKER}"
 
+	return text
+
+type CommandInfo = tuple[str, CommandArgs]
+type CommandSet = dict[str, CommandInfo]
+def help_msg(commands: CommandSet, in_group: bool) -> str:
+	text = "🧰 Помощь по командам бота:\n\n" + '\n'.join(command_info(
+		c, escape_unformatted(info[0]), info[1]
+	) for c, info in commands.items())
+
+	if len(commands) > 0 and in_group:
+		text += "\n\n⚙️ Допустимо использовать флаги для настройки поведения некоторых команд:\n\n"
+
+		text += "\n".join((
+			command_flags(
+				"Ответ публичный, сообщение с командой от пользователя удаляется ботом", "post", '!'
+			), 
+			command_flags("Ответ отправляется без звука", "silent", 's'),
+			command_flags("То же, что и `post !`", "post!")
+		))
+
+		text += ("\n\n❗️ Эти флаги работают только в групповых чатах\\."
+			" Флаги должны указываться после всех аргументов команды и разделятся пробелами")
 	return text

@@ -333,13 +333,10 @@ class Subject:
 	practice_chat: str | None = None
 	
 	def get_chat(self, kind: LessonKind) -> str | None:
-		result: None | str = None
-		if kind is LessonKind.LECTURE:
-			result = self.lecture_chat
-		elif kind is LessonKind.PRACTICE:
-			result = self.practice_chat
-		
-		return result or self.main_chat
+		match kind:
+			case LessonKind.LECTURE: return self.lecture_chat
+			case LessonKind.PRACTICE: return self.practice_chat
+			case _: return self.main_chat
 
 def _decode_subject(subject: dict[str, Any], id: str, schedule: Schedule, at: _At) -> Subject:
 	name = _object_get_existed(subject, str, "name", at)
@@ -352,9 +349,10 @@ def _decode_subject(subject: dict[str, Any], id: str, schedule: Schedule, at: _A
 	mc, lc, pc = None, None, None
 
 	if isinstance(chat, dict):
-		mc = _object_get_provided(subject, str, "main", at, allow_null=True)
-		lc = _object_get_provided(subject, str, "lecture", at, allow_null=True)
-		pc = _object_get_provided(subject, str, "practice", at, allow_null=True)
+		at = _sub(at, "chat")
+		mc = _object_get_provided(chat, str, "main", at, allow_null=True)
+		lc = _object_get_provided(chat, str, "lecture", at, allow_null=True)
+		pc = _object_get_provided(chat, str, "practice", at, allow_null=True)
 	elif isinstance(chat, str):
 		mc, lc, pc = chat, chat, chat
 

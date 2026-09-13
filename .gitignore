@@ -4,5 +4,6 @@
 config/*.json
 logs/*.log
 module/__pycache__/**
+data/**
 
 token.txt
