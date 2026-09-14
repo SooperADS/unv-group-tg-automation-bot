@@ -41,6 +41,16 @@
 			"maxLength": 36,
 			"pattern": "^[0-9a-fA-F]{8}-([0-9a-fA-F]{4}-){3}[0-9a-fA-F]{12}$"
 		},
+		"string?": {
+			"oneOf": [
+				{
+					"type": "string"
+				},
+				{
+					"type": "null"
+				}
+			]
+		},
 
 		"lesson": {
 			"type": "array",
@@ -93,8 +103,26 @@
 					"pattern": "^[-A-Za-z0-9А-Яа-яЁё]+$"
 				},
 				"exam": {
-					"title": "Форма зачёта",
-					"$ref": "#/$defs/exam-kind"
+					"title": "Информация об экзамене",
+					"type": "object",
+					"properties": {
+						"kind": {
+							"title": "Тип экзамена",
+							"$ref": "#/$defs/exam-kind"
+						},
+						"requirements": {
+							"title": "Требования к сдачи экзамена",
+							"description": "Если null - требования неизвестны",
+							"$ref": "#/$defs/string?"
+						},
+						"form": {
+							"title": "Форма сдачи экзамена",
+							"description": "Если null - неизвестно",
+							"$ref": "#/$defs/string?"
+						}
+					},
+					"additionalProperties": false,
+					"required": [ "kind", "requirements", "form" ]
 				}
 			},
 			"additionalProperties": false,
