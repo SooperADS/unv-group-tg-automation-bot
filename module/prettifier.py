@@ -51,7 +51,7 @@ def lesson_kind_name(lesson: LessonNote) -> str:
 		case LessonKind.CONSULTATION: return 'консультация'
 		case _: pass
 	
-	return exam_kind_name(lesson.subject.exam)
+	return exam_kind_name(lesson.subject.exam_kind)
 	
 def lesson_kind_dec(k: LessonKind) -> str | None:
 	match k:
@@ -70,7 +70,7 @@ def exam_kind_dec(k: SubjectExamKind) -> str | None:
 def lesson_dec(lesson: LessonNote) -> str:
 	if lesson is None:
 		return '🪟'
-	return f'{lesson_kind_dec(lesson.kind) or exam_kind_dec(lesson.subject.exam) or "\\#"}'
+	return f'{lesson_kind_dec(lesson.kind) or exam_kind_dec(lesson.subject.exam_kind) or "\\#"}'
 
 LAST_LESSON_MARKER = "*ПОСЛЕДНЯЯ*"
 
@@ -91,6 +91,8 @@ def weekday_marker(v: date) -> str:
 def day_marker(day_index: ScheduleDayIndex, schedule: Schedule) -> str:
 	date = schedule.to_date(day_index)
 	return f"{str_date(date)} \\[*{day_index.week + 1} неделя*\\]"
+def str_or_unknown(v: str | None) -> str:
+	return "*НЕИЗВЕСТНО*" if v is None else escape_unformatted(v)
 
 def lesson_link(lesson: Lesson) -> str | None:
 	chat = lesson.specified_chat
@@ -137,10 +139,12 @@ def day_lessons_list(day: ScheduleDayNote, schedule: Schedule) -> str:
 	) for i, v in enumerate(day.lessons))
 
 def subject_info(subject: Subject, id: str) -> str:
-	exam = subject.exam
-	return (f"*{escape_unformatted(subject.name)}* \\[\\#{escape_unformatted(subject.tag)}\\]:\n"
-		f"Форма экзамена: {exam_kind_dec(exam)} *{exam_kind_name(exam).upper()}*\n"
-		f"ID в реестре: `{escape_unformatted(id)}`")
+	ek = subject.exam_kind
+	return (f"*{escape_unformatted(subject.name)}* "
+		f"\\[\\#{escape_unformatted(subject.tag)} // `{escape_unformatted(id)}`\\]:\n"
+		f"Форма экзамена: {exam_kind_dec(ek)} *{exam_kind_name(ek).upper()}*\n"
+		f"Требования к сдачи: {str_or_unknown(subject.exam_requirements)}\n"
+		f"Форма сдачи: {str_or_unknown(subject.exam_form)}")
 
 # ==============================
 #  Message builders
@@ -198,11 +202,11 @@ def now_msg(schedule: Schedule, li: LessonIndex, is_right_now: bool) -> str:
 	return text
 
 def subjects_msg(schedule: Schedule) -> str:
-	infix = '' if schedule.name is None else f"*{escape_unformatted(schedule.name)}* //"
+	infix = '' if schedule.name is None else f"*{escape_unformatted(schedule.name)}* // "
 	text = f"📚 {infix}Предметы:"
 
 	for id, subject in schedule.get_subjects():
-		text += f"\n\n📄 {subject_info(subject, id)}"
+		text += f"\n\n📗 {subject_info(subject, id)}"
 
 	return text
 def help_msg(commands: CommandSet, in_group: bool) -> str:

@@ -86,7 +86,7 @@ def _object_get_provided[K: _Primitive](
 ) -> K | None:
 	if key in obj:
 		v: K | None = obj.get(key)
-		if (not allow_null and v is None) or not isinstance(v, t):
+		if (not allow_null and v is None) or (not isinstance(v, t) and v is not None):
 			_raise_unexpected_type(v, _sub(at, key), _primitive_name(t), *(
 				(_NULL_TYPE,) if allow_null else ()
 			))
@@ -326,7 +326,10 @@ class Subject:
 	name: str
 	tag: str
 	id: str
-	exam: SubjectExamKind
+	
+	exam_kind: SubjectExamKind
+	exam_requirements: str | None
+	exam_form: str | None
 
 	main_chat: str | None = None
 	lecture_chat: str | None = None
@@ -341,22 +344,33 @@ class Subject:
 def _decode_subject(subject: dict[str, Any], id: str, schedule: Schedule, at: _At) -> Subject:
 	name = _object_get_existed(subject, str, "name", at)
 	tag = _object_get_existed(subject, str, "tag", at)
-	exam = _object_get_existed_enum(
-		subject, SubjectExamKind, "exam", at, default=SubjectExamKind.UNKNOWN
-	)
+	exam = _object_get_existed(subject, dict, "exam", at)
 	
 	chat = subject.get("chat")
 	mc, lc, pc = None, None, None
 
 	if isinstance(chat, dict):
-		at = _sub(at, "chat")
-		mc = _object_get_provided(chat, str, "main", at, allow_null=True)
-		lc = _object_get_provided(chat, str, "lecture", at, allow_null=True)
-		pc = _object_get_provided(chat, str, "practice", at, allow_null=True)
+		cat = _sub(at, "chat")
+		mc = _object_get_provided(chat, str, "main", cat, allow_null=True)
+		lc = _object_get_provided(chat, str, "lecture", cat, allow_null=True)
+		pc = _object_get_provided(chat, str, "practice", cat, allow_null=True)
 	elif isinstance(chat, str):
 		mc, lc, pc = chat, chat, chat
 
-	return Subject(schedule, name, tag, id, exam, mc, lc, pc)
+	eat = _sub(at, "exam")
+	exam_form = _object_get_provided(exam, str, "form", eat, allow_null=True)
+	exam_kind = _object_get_existed_enum(
+		exam, SubjectExamKind, "kind", eat, default=SubjectExamKind.UNKNOWN
+	)
+	exam_rq = _object_get_provided(
+		exam, str, "requirements", eat, allow_null=True
+	)
+
+	return Subject(
+		schedule, name, tag, id, exam_kind,
+		exam_rq, exam_form,
+		mc, lc, pc
+	)
 	
 # ==============================
 #  Schedule class and their
