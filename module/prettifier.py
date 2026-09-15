@@ -179,10 +179,13 @@ def week_schedule_msg(schedule: Schedule, index: int) -> str:
 	return text
 def now_msg(schedule: Schedule, li: LessonIndex, is_right_now: bool) -> str:
 	day = schedule.get_day(li.day_index)
-	if li.lesson_index is None or day is None or day.bounds is None:
+	if day is None or day.bounds is None:
 		return "Сегодня пар нет"
 
-	ls = day.fetch_lesson(li.lesson_index)
+	ls = None
+	if li.lesson_index is not None:
+		day.fetch_lesson(li.lesson_index)
+
 	if ls is None:
 		return "Пары закончились"
 
