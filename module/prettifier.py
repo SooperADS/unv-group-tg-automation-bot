@@ -184,7 +184,7 @@ def now_msg(schedule: Schedule, li: LessonIndex, is_right_now: bool) -> str:
 
 	ls = None
 	if li.lesson_index is not None:
-		day.fetch_lesson(li.lesson_index)
+		ls = day.fetch_lesson(li.lesson_index)
 
 	if ls is None:
 		return "Пары закончились"
