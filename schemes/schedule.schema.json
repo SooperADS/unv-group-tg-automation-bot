@@ -88,7 +88,6 @@
 									"$ref": "#/$defs/link?"
 								}
 							},
-							"additionalProperties": false,
 							"minProperties": 1
 						}
 					]
@@ -121,11 +120,9 @@
 							"$ref": "#/$defs/string?"
 						}
 					},
-					"additionalProperties": false,
 					"required": [ "kind", "requirements", "form" ]
 				}
 			},
-			"additionalProperties": false,
 			"required": [ "name", "tag", "exam" ]
 		},
 		"day": {
@@ -233,7 +230,6 @@
 							"maximum": 2100
 						}
 					},
-					"additionalProperties": false,
 					"required": [ "lessons", "lesson-duration", "first-week", "first-year" ]
 				},
 				"chat": {
@@ -247,7 +243,6 @@
 					"maxLength": 64
 				}
 			},
-			"additionalProperties": false,
 			"required": [ "timings", "chat" ]
 		},
 		"subjects": {
