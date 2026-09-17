@@ -76,6 +76,9 @@ SUBJECTS_CMD: _Cmd = ("subjects", "Информация о предметах", 
 NEXT_CMD: _Cmd = ("next", "Следующая пара по предмету", {
 	"subject": "tag | subject_id"
 })
+S_CMD: _Cmd = ("s", "Получить информацию о предмете", {
+	"subject": "tag | subject_id"
+})
 RELOAD_CMD: _Cmd = ("reload", "Обновить расписание", None)
 
 # PUBLISH_CMD: _Cmd = ("publish", "Публикует сообщение по предмету", {
@@ -90,6 +93,7 @@ GLOBAL_CMDS: _Cmd_Group = (
 	to_command(TOMORROW_CMD, True),
 	to_command(NOW_CMD, True),
 	to_command(SCHEDULE_CMD, True),
+	to_command(S_CMD, True),
 	to_command(RELOAD_CMD, True),
 )
 PRIVATE_CMDS: _Cmd_Group = (
@@ -100,6 +104,7 @@ PRIVATE_CMDS: _Cmd_Group = (
 	to_command(TOMORROW_CMD),
 	to_command(NOW_CMD),
 	to_command(SCHEDULE_CMD),
+	to_command(S_CMD),
 	to_command(RELOAD_CMD),
 )
 DEFAULT_CMDS: _Cmd_Group = GLOBAL_CMDS
@@ -112,6 +117,7 @@ GROUP_COMMAND_SET = to_command_set(
 	NOW_CMD,
 	SCHEDULE_CMD,
 	NEXT_CMD,
+	S_CMD,
 	RELOAD_CMD
 )
 PRIVATE_COMMAND_SET = to_command_set(
@@ -122,6 +128,7 @@ PRIVATE_COMMAND_SET = to_command_set(
 	NOW_CMD,
 	SCHEDULE_CMD,
 	NEXT_CMD,
+	S_CMD,
 	RELOAD_CMD
 )
 
@@ -246,28 +253,38 @@ async def subjects_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
 	await _send_message(msg, *await _handle_cmd_generic_args(msg, user, u, ctx), (
 		pret.subjects_msg(s)
 	))
+
+def _decode_subject_arg(args: list[str] | None, s: sc.Schedule) -> sc.Subject | str:
+	tag_or_id = _extract_arg(args, str, 0, None)
+	if tag_or_id is None:
+		LOG.warning("No subject argument provided")
+		return pret.no_req_arg_err("subject")
+	
+	subject = s.get_subject_by_str(tag_or_id)
+
+	if subject is None:
+		LOG.warning(f"Unknown subject {tag_or_id!r} in schedule {s.name!r}")
+		return pret.unknown_subject_err(tag_or_id)
+	
+	return subject
+
+async def s_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
+	msg, user = _deconstruct_update(u)
+
+	s = MAIN_SCHEDULE
+	subject = _decode_subject_arg(ctx.args, s)
+
+	await _send_message(msg, *await _handle_cmd_generic_args(msg, user, u, ctx), 
+		subject if isinstance(subject, str) else pret.s_msg(subject)
+	)
 async def next_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
 	msg, user = _deconstruct_update(u)
 
 	s = MAIN_SCHEDULE
-	tag_or_id = _extract_arg(ctx.args, str, 0, None)
 	a_co = await _handle_cmd_generic_args(msg, user, u, ctx)
-	if tag_or_id is None:
-		LOG.warning("No subject argument provided")
-		return await _send_message(msg, *a_co, pret.error_msg(
-			"Аргумент `subject` не указан"
-		))
 	
-	subject = (s.get_subject_by_id(tag_or_id)
-		or s.get_subject_by_tag(tag_or_id))
-
-	if subject is None:
-		LOG.warning(f"Unknown subject {tag_or_id!r} in schedule {s.name!r}")
-		return await _send_message(msg, *a_co, pret.error_msg(
-			f"Предмет с ID или тегом `{pret.escape_unformatted(tag_or_id)}` не найден"
-		))
-
-	await _send_message(msg, *a_co, (
+	subject = _decode_subject_arg(ctx.args, s)
+	await _send_message(msg, *a_co, subject if isinstance(subject, str) else (
 		pret.next_msg(s, s.current_lesson_index, subject)
 	))
 

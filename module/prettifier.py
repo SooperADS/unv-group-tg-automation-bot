@@ -141,10 +141,11 @@ def day_lessons_list(day: ScheduleDayNote, schedule: Schedule) -> str:
 		v, i, schedule
 	) for i, v in enumerate(day.lessons))
 
-def subject_info(subject: Subject, id: str) -> str:
+def subject_info(subject: Subject) -> str:
 	ek = subject.exam_kind
 	return (f"*{escape_unformatted(subject.name)}* "
-		f"\\[\\#{escape_unformatted(subject.tag)} // `{escape_unformatted(id)}`\\]:\n"
+		f"\\[\\#{escape_unformatted(subject.tag)}\\]:\n"
+		f"ID в реестре: `{escape_unformatted(subject.id)}`\n"
 		f"Форма экзамена: {exam_kind_dec(ek)} *{exam_kind_name(ek).upper()}*\n"
 		f"Требования к сдачи: {str_or_unknown(subject.exam_requirements)}\n"
 		f"Форма сдачи: {str_or_unknown(subject.exam_form)}")
@@ -152,6 +153,14 @@ def subject_info(subject: Subject, id: str) -> str:
 # ==============================
 #  Message builders
 # ==============================
+
+def reload_msg() -> str:
+	return "✅ Расписание обновлено"
+def s_msg(subject: Subject) -> str:
+	return f"📗 {subject_info(subject)}"
+
+PROJECT_REPO = "https://github.com/SooperADS/unv-group-tg-automation-bot.git"
+PROJECT_HOST = "GitHub"
 
 def day_schedule_msg(schedule: Schedule, day_index: ScheduleDayIndex):
 	day, day_date = schedule.get_day(day_index), day_marker(day_index, schedule)
@@ -217,18 +226,15 @@ def next_msg(schedule: Schedule, index: LessonIndex, subject: Subject) -> str:
 			f"*ДАТА*: {day_marker(lp[0].day_index, schedule)}")
 
 	return text
-
-PROJECT_REPO = "https://github.com/SooperADS/unv-group-tg-automation-bot.git"
-PROJECT_HOST = "GitHub"
-
 def subjects_msg(schedule: Schedule) -> str:
 	infix = '' if schedule.name is None else f"*{escape_unformatted(schedule.name)}* // "
 	text = f"📚 {infix}Предметы:"
 
-	for id, subject in schedule.get_subjects():
-		text += f"\n\n📗 {subject_info(subject, id)}"
+	for subject in schedule.get_subjects():
+		text += f"\n\n{s_msg(subject)}"
 
 	return text
+
 def help_msg(commands: CommandSet, in_group: bool) -> str:
 	text = "🧰 Помощь по командам бота:\n\n" + '\n'.join(command_info(
 		c, escape_unformatted(info[0]), info[1]
@@ -250,7 +256,14 @@ def help_msg(commands: CommandSet, in_group: bool) -> str:
 
 	return text + f"\n\n💿 Мой исходный код доступен на [{PROJECT_HOST}]({PROJECT_REPO})"
 
+# ==============================
+#  Error messages
+# ==============================
+
 def error_msg(text: str) -> str:
 	return "⚠️ *ОШИБКА*: " + text
-def reload_msg() -> str:
-	return "✅ Расписание обновлено"
+
+def unknown_subject_err(tag_or_id: str) -> str:
+	return error_msg(f"Предмет с ID или тегом `{escape_unformatted(tag_or_id)}` не найден")
+def no_req_arg_err(arg: str) -> str:
+	return error_msg(f"Аргумент `{escape_unformatted(arg)}` не указан")

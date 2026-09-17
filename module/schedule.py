@@ -157,7 +157,7 @@ def _decode_lesson(list: list[Any], schedule: Schedule, at: _At) -> Lesson:
 	if not isinstance(subject_id, str):
 		_raise_unexpected_type(subject_id, _sub(at, 0), _STR_TYPE)
 	
-	subject = schedule.get_subject_by_id(subject_id)
+	subject = schedule.get_subject_by_str(subject_id)
 	if subject is None:
 		_raise_unknown_instance(subject, Subject, _sub(at, 1))
 
@@ -433,7 +433,6 @@ def span_with_date(span: TimeSpan, d: date | None = None) -> DateTimeSpan:
 @dataclass(slots=True)
 class Schedule:
 	_subject_registry: dict[str, Subject]
-	_subject_tags: dict[str, Subject]
 	_named_weeks: dict[str, ScheduleWeek]
 	_schedule: tuple[ScheduleWeekNote, ...]
 
@@ -497,7 +496,6 @@ class Schedule:
 
 	def __init__(self, root: dict[Any, Any] | None) -> None:
 		self._subject_registry = dict()
-		self._subject_tags = dict()
 		self._named_weeks = dict()
 		
 		self._schedule = ()
@@ -563,7 +561,6 @@ class Schedule:
 
 		### SETUP ###
 		self._subject_registry.clear()
-		self._subject_tags.clear()
 		self._named_weeks.clear()
 
 		AT_SUBJECTS = _sub(_AT_ROOT, "subjects")
@@ -574,7 +571,7 @@ class Schedule:
 
 			s = _decode_subject(v, k, self, at)
 			self._subject_registry[k] = s
-			self._subject_tags[s.tag] = s
+			self._subject_registry[s.tag] = s
 
 		AT_WEEKS = _sub(_AT_ROOT, "weeks")
 		if weeks is not None:
@@ -587,12 +584,12 @@ class Schedule:
 		self.load_general(general)
 		self.load_schedule(schedule)
 
-	def get_subject_by_id(self, id: str) -> Subject | None:
-		return self._subject_registry.get(id)
-	def get_subject_by_tag(self, tag: str) -> Subject | None:
-		return self._subject_tags.get(tag)
-	def get_subjects(self) -> Iterable[tuple[str, Subject]]:
-		return self._subject_registry.items()
+	def get_subject_by_str(self, tag_or_id: str) -> Subject | None:
+		return self._subject_registry.get(tag_or_id)
+	def get_subjects(self) -> Iterable[Subject]:
+		for k, v in self._subject_registry.items():
+			if k != v.tag:
+				yield v
 	def get_week_by_name(self, name: str) -> ScheduleWeekNote:
 		return self._named_weeks.get(name)
 	
