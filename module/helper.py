@@ -79,7 +79,7 @@ NEXT_CMD: _Cmd = ("next", "Следующая пара по предмету", {
 S_CMD: _Cmd = ("s", "Получить информацию о предмете", {
 	"subject": "tag | subject_id"
 })
-RELOAD_CMD: _Cmd = ("reload", "Обновить расписание", None)
+RELOAD_CMD: _Cmd = ("reload", "Обновить конфигурацию бота. Не вводить без надобности", None)
 
 # PUBLISH_CMD: _Cmd = ("publish", "Публикует сообщение по предмету", {
 # 	"subject": "tag"
