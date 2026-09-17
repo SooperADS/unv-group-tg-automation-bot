@@ -146,9 +146,9 @@ def subject_info(subject: Subject) -> str:
 	return (f"*{escape_unformatted(subject.name)}* "
 		f"\\[\\#{escape_unformatted(subject.tag)}\\]:\n"
 		f"ID в реестре: `{escape_unformatted(subject.id)}`\n"
-		f"Форма экзамена: {exam_kind_dec(ek)} *{exam_kind_name(ek).upper()}*\n"
-		f"Требования к сдачи: {str_or_unknown(subject.exam_requirements)}\n"
-		f"Форма сдачи: {str_or_unknown(subject.exam_form)}")
+		f"Форма экзамена: {exam_kind_dec(ek)} *{exam_kind_name(ek).upper()}*"
+		f"{('' if subject.exam_form is None else ' // ' + str_or_unknown(subject.exam_form))}\n"
+		f"Требования к сдачи: {str_or_unknown(subject.exam_requirements)}")
 
 # ==============================
 #  Message builders
