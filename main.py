@@ -6,7 +6,6 @@ from os import path
 import telegram.ext as ext
 
 from module.consts import *
-import module.schedule as schedule
 import module.helper as h
 
 # ==============================
@@ -49,13 +48,11 @@ if __name__ == '__main__':
 		h.make_handler(h.help_cmd_h, h.HELP_CMD, block=False),
 		h.make_handler(h.subjects_cmd_h, h.SUBJECTS_CMD, block=False),
 		h.make_handler(h.next_cmd_h, h.NEXT_CMD, block=False),
+		h.make_handler(h.reload_cmd_h, h.RELOAD_CMD, block=True),
 	))
 
 	async def _app_post_init(_):
-		schedule.reload_schedule(
-			h.MAIN_SCHEDULE, path.join(CONFIG_DIR, SCHEDULE_FILE), LOG
-		)
-		
+		h.reload_main_schedule()
 		success = await h.registry_commands(app.bot)
 		LOG.info(f"Bot commands setup success: {success}")
 		if not success:

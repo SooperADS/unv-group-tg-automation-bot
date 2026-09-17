@@ -2,12 +2,14 @@ from collections.abc import Callable
 from types import CoroutineType
 from typing import Any, NamedTuple, final
 from datetime import datetime
+from os import path
 
 import logging
 import telegram as tg
 import telegram.ext as ext
 import telegram.constants as tgc
 
+from module.consts import *
 import module.prettifier as pret
 import module.schedule as sc
 
@@ -74,6 +76,7 @@ SUBJECTS_CMD: _Cmd = ("subjects", "Информация о предметах", 
 NEXT_CMD: _Cmd = ("next", "Следующая пара по предмету", {
 	"subject": "tag | subject_id"
 })
+RELOAD_CMD: _Cmd = ("reload", "Обновить расписание", None)
 
 # PUBLISH_CMD: _Cmd = ("publish", "Публикует сообщение по предмету", {
 # 	"subject": "tag"
@@ -81,21 +84,23 @@ NEXT_CMD: _Cmd = ("next", "Следующая пара по предмету", {
 
 GLOBAL_CMDS: _Cmd_Group = (
 	to_command(HELP_CMD, True),
+	to_command(NEXT_CMD, True),
 	to_command(SUBJECTS_CMD, True),
 	to_command(TODAY_CMD, True),
 	to_command(TOMORROW_CMD, True),
 	to_command(NOW_CMD, True),
 	to_command(SCHEDULE_CMD, True),
-	to_command(NEXT_CMD, True),
+	to_command(RELOAD_CMD, True),
 )
 PRIVATE_CMDS: _Cmd_Group = (
 	to_command(HELP_CMD),
+	to_command(NEXT_CMD),
 	to_command(SUBJECTS_CMD),
 	to_command(TODAY_CMD),
 	to_command(TOMORROW_CMD),
 	to_command(NOW_CMD),
 	to_command(SCHEDULE_CMD),
-	to_command(NEXT_CMD),
+	to_command(RELOAD_CMD),
 )
 DEFAULT_CMDS: _Cmd_Group = GLOBAL_CMDS
 
@@ -106,7 +111,8 @@ GROUP_COMMAND_SET = to_command_set(
 	TOMORROW_CMD,
 	NOW_CMD,
 	SCHEDULE_CMD,
-	NEXT_CMD
+	NEXT_CMD,
+	RELOAD_CMD
 )
 PRIVATE_COMMAND_SET = to_command_set(
 	HELP_CMD,
@@ -115,7 +121,8 @@ PRIVATE_COMMAND_SET = to_command_set(
 	TOMORROW_CMD,
 	NOW_CMD,
 	SCHEDULE_CMD,
-	NEXT_CMD
+	NEXT_CMD,
+	RELOAD_CMD
 )
 
 async def registry_commands(bot: tg.Bot) -> bool:
@@ -128,6 +135,9 @@ async def remove_commands(bot: tg.Bot) -> bool:
 		and await bot.delete_my_commands(CMD_SCOPE_ADMINS)
 		and await bot.delete_my_commands(CMD_SCOPE_PRIVATE)
 		and await bot.delete_my_commands())
+
+def reload_main_schedule():
+	sc.reload_schedule(MAIN_SCHEDULE, path.join(CONFIG_DIR, SCHEDULE_FILE), LOG)
 
 # ==============================
 #  Handlers
@@ -261,6 +271,13 @@ async def next_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
 		pret.next_msg(s, s.current_lesson_index, subject)
 	))
 
+async def reload_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
+	msg, user = _deconstruct_update(u)
+	
+	reload_main_schedule()
+	await _send_message(
+		msg, *await _handle_cmd_generic_args(msg, user, u, ctx), pret.reload_msg()
+	)
 async def help_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
 	msg, user = _deconstruct_update(u)
 

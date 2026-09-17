@@ -252,3 +252,5 @@ def help_msg(commands: CommandSet, in_group: bool) -> str:
 
 def error_msg(text: str) -> str:
 	return "⚠️ *ОШИБКА*: " + text
+def reload_msg() -> str:
+	return "✅ Расписание обновлено"
