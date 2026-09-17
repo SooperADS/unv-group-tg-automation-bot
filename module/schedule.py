@@ -396,6 +396,8 @@ class ScheduleDayIndex(NamedTuple):
 		w = nw // 7 + self.week
 		return ScheduleDayIndex(w, nw % 7)
 
+type ScheduleDayPair = tuple[ScheduleDayIndex, ScheduleDay]
+
 @final
 class LessonIndex(NamedTuple):
 	day_index: ScheduleDayIndex
@@ -413,6 +415,9 @@ class LessonIndex(NamedTuple):
 	@property
 	def weekday(self) -> int:
 		return self.day_index.weekday
+
+type LessonIndexResult = LessonIndex | None
+type LessonPair = tuple[LessonIndex, Lesson]
 
 def timedelta_as_time(v: timedelta) -> time:
 	return time((v.seconds // 3600) % 24, (v.seconds // 60) % 60)
@@ -527,7 +532,9 @@ class Schedule:
 			stamps.append(_decode_time_hm(stamp, _sub(AT, i)))
 
 		stamps.sort()
-		d = _decode_time_hm(lesson_d, _sub(AT_TIMINGS, "lesson-duration"))
+		d = _decode_time_hm(lesson_d, _sub(
+			AT_TIMINGS, "lesson-duration"
+		))
 
 		### SETUP ###
 		self._lessons_duration = timedelta(hours=d[0], minutes=d[1])
@@ -594,8 +601,8 @@ class Schedule:
 	def get_day(self, index: ScheduleDayIndex) -> ScheduleDayNote:
 		week = self.get_week(index.week)
 		return None if week is None else week.get_day(index.weekday)
-	def get_lesson(self, index: LessonIndex) -> LessonNote:
-		if index.lesson_index is not None:
+	def get_lesson(self, index: LessonIndexResult) -> LessonNote:
+		if index is not None and index.lesson_index is not None:
 			day = self.get_day(index.day_index)
 			if day is not None: 
 				return day.get_lesson(index.lesson_index)
@@ -624,6 +631,23 @@ class Schedule:
 				break
 
 		return self.to_day_index(timestamp).extend(di), irn
+
+	def search_lesson(
+		self,
+		start: LessonIndexResult,
+		number: int = 1, *,
+		type: Subject | None = None,
+		kind: LessonKind | None = None
+	) -> LessonPair | None:
+		n = number
+		for li, ls in self.lessons(start):
+			if (type is None or ls.subject == type) and (kind is None or ls.kind == kind):
+				if n <= 0:
+					return li, ls
+
+				n -= 1
+		
+		return None
 	
 	def to_iso_year_and_week(self, week_index: int) -> tuple[int, int]:
 		# NEED_CHECK:
@@ -637,6 +661,43 @@ class Schedule:
 	def to_date(self, index: ScheduleDayIndex) -> date:
 		y, w = self.to_iso_year_and_week(index.week)
 		return date.fromisocalendar(y, w, index.weekday + 1)
+
+	def weeks(self, start: int | None = None) -> Iterable[ScheduleWeekNote]:
+		i, l = start or 0, len(self._schedule)
+		
+		while i < l:
+			yield self._schedule[i]
+			i += 1		
+	def days(self, start: ScheduleDayIndex | None = None) -> Iterable[ScheduleDayPair]:
+		i, j, l = 0, 0, len(self._schedule)
+		if start is not None:
+			i, j = start.week, start.weekday
+		
+		while i < l:
+			w = self._schedule[i]
+
+			if w is not None:
+				while j < len(w.week):
+					day = w.get_day(j)
+					if day is not None:
+						yield ScheduleDayIndex(i, j), day
+
+					j += 1
+			j = 0
+			i += 1
+	def lessons(self, start: LessonIndexResult = None) -> Iterable[LessonPair]:
+		i, di = 0, None
+		if start is not None:
+			i, di = start.lesson_index or 0, start.day_index
+		
+		for awi, day in self.days(di):
+			while i < len(day.lessons):
+				lesson = day.get_lesson(i)
+				if lesson is not None:
+					yield LessonIndex(awi, i), lesson
+
+				i += 1
+			i = 0
 
 # ==============================
 #  Global initialization helpers

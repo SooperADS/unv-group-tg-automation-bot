@@ -67,10 +67,13 @@ TODAY_CMD: _Cmd = ("today", "Текущие расписание на сегод
 TOMORROW_CMD: _Cmd = ("tomorrow", "Текущие расписание на завтра", None)
 NOW_CMD: _Cmd = ("now", "Текущая/следующая пара", None)
 SCHEDULE_CMD: _Cmd = ("schedule", "Публикует текущее расписание", {
-	"offset": "int"
+	"offset": "int?"
 })
 HELP_CMD: _Cmd = ("help", "Помощь по командам", None)
 SUBJECTS_CMD: _Cmd = ("subjects", "Информация о предметах", None)
+NEXT_CMD: _Cmd = ("next", "Следующая пара по предмету", {
+	"subject": "tag | subject_id"
+})
 
 # PUBLISH_CMD: _Cmd = ("publish", "Публикует сообщение по предмету", {
 # 	"subject": "tag"
@@ -83,6 +86,7 @@ GLOBAL_CMDS: _Cmd_Group = (
 	to_command(TOMORROW_CMD, True),
 	to_command(NOW_CMD, True),
 	to_command(SCHEDULE_CMD, True),
+	to_command(NEXT_CMD, True),
 )
 PRIVATE_CMDS: _Cmd_Group = (
 	to_command(HELP_CMD),
@@ -91,6 +95,7 @@ PRIVATE_CMDS: _Cmd_Group = (
 	to_command(TOMORROW_CMD),
 	to_command(NOW_CMD),
 	to_command(SCHEDULE_CMD),
+	to_command(NEXT_CMD),
 )
 DEFAULT_CMDS: _Cmd_Group = GLOBAL_CMDS
 
@@ -100,7 +105,8 @@ GROUP_COMMAND_SET = to_command_set(
 	TODAY_CMD,
 	TOMORROW_CMD,
 	NOW_CMD,
-	SCHEDULE_CMD
+	SCHEDULE_CMD,
+	NEXT_CMD
 )
 PRIVATE_COMMAND_SET = to_command_set(
 	HELP_CMD,
@@ -108,7 +114,8 @@ PRIVATE_COMMAND_SET = to_command_set(
 	TODAY_CMD,
 	TOMORROW_CMD,
 	NOW_CMD,
-	SCHEDULE_CMD
+	SCHEDULE_CMD,
+	NEXT_CMD
 )
 
 async def registry_commands(bot: tg.Bot) -> bool:
@@ -228,6 +235,30 @@ async def subjects_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
 	s = MAIN_SCHEDULE
 	await _send_message(msg, *await _handle_cmd_generic_args(msg, user, u, ctx), (
 		pret.subjects_msg(s)
+	))
+async def next_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):
+	msg, user = _deconstruct_update(u)
+
+	s = MAIN_SCHEDULE
+	tag_or_id = _extract_arg(ctx.args, str, 0, None)
+	a_co = await _handle_cmd_generic_args(msg, user, u, ctx)
+	if tag_or_id is None:
+		LOG.warning("No subject argument provided")
+		return await _send_message(msg, *a_co, pret.error_msg(
+			"Аргумент `subject` не указан"
+		))
+	
+	subject = (s.get_subject_by_id(tag_or_id)
+		or s.get_subject_by_tag(tag_or_id))
+
+	if subject is None:
+		LOG.warning(f"Unknown subject {tag_or_id!r} in schedule {s.name!r}")
+		return await _send_message(msg, *a_co, pret.error_msg(
+			f"Предмет с ID или тегом `{pret.escape_unformatted(tag_or_id)}` не найден"
+		))
+
+	await _send_message(msg, *a_co, (
+		pret.next_msg(s, s.current_lesson_index, subject)
 	))
 
 async def help_cmd_h(u: tg.Update, ctx: ext.ContextTypes.DEFAULT_TYPE):

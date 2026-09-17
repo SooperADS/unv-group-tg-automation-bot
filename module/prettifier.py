@@ -98,8 +98,10 @@ def lesson_link(lesson: Lesson) -> str | None:
 	chat = lesson.specified_chat
 	return None if chat is None else str_chat_link("тут", chat)
 
+def scheduled_lesson_base(lesson: LessonNote, i: int, schedule: Schedule) -> str:
+	return f"{lesson_number_marker(i, schedule)} // {lesson_note_marker(lesson)}"
 def scheduled_lesson(lesson: LessonNote, i: int, schedule: Schedule) -> str:
-	return (f"{lesson_number_marker(i, schedule)} // {lesson_note_marker(lesson)}" +
+	return (scheduled_lesson_base(lesson, i, schedule) +
 		("" if lesson is None else f" \\[*{escape_unformatted(lesson.subject.name)}*\\]"))
 def scheduled_lesson_with_link(lesson: LessonNote, i: int, schedule: Schedule) -> str:
 	text = scheduled_lesson(lesson, i, schedule)
@@ -114,11 +116,12 @@ def command_with_args(cmd: str, args: CommandArgs) -> str:
 	text = f"/{cmd}"
 	if args is not None:
 		for k, v in args.items():
-			text += f" <`{k}`{'' if v is None else f': {v}'}\\>"
+			text += (f" <`{escape_unformatted(k)}`"
+				f"{'' if v is None else f': {escape_unformatted(v)}'}\\>")
 
 	return text
 def command_flags(formatted_description: str, /, *names: str) -> str:
-	return " или ".join(f"`{v}`" for v in names) + f" – {formatted_description}"
+	return f"{' или '.join(f'`{escape_unformatted(v)}`' for v in names)} – {formatted_description}"
 
 # ==============================
 #  Text blocks builders
@@ -202,6 +205,21 @@ def now_msg(schedule: Schedule, li: LessonIndex, is_right_now: bool) -> str:
 		text += f" {LAST_LESSON_MARKER}"
 
 	return text
+def next_msg(schedule: Schedule, index: LessonIndex, subject: Subject) -> str:
+	lp = schedule.search_lesson(index, type=subject)
+	text = f"📙 {escape_unformatted(subject.name)}\n\n*ПАРА*: "
+
+	if lp is None:
+		text += "⚠️ Отсутствует в расписании"
+	else:
+		assert lp[0].lesson_index is not None
+		text += (f"{scheduled_lesson_base(lp[1], lp[0].lesson_index, schedule)}\n"
+			f"*ДАТА*: {day_marker(lp[0].day_index, schedule)}")
+
+	return text
+
+PROJECT_REPO = "https://github.com/SooperADS/unv-group-tg-automation-bot.git"
+PROJECT_HOST = "GitHub"
 
 def subjects_msg(schedule: Schedule) -> str:
 	infix = '' if schedule.name is None else f"*{escape_unformatted(schedule.name)}* // "
@@ -229,4 +247,8 @@ def help_msg(commands: CommandSet, in_group: bool) -> str:
 
 		text += ("\n\n❗️ Эти флаги работают только в групповых чатах\\."
 			" Флаги должны указываться после всех аргументов команды и разделятся пробелами")
-	return text
+
+	return text + f"\n\n💿 Мой исходный код доступен на [{PROJECT_HOST}]({PROJECT_REPO})"
+
+def error_msg(text: str) -> str:
+	return "⚠️ *ОШИБКА*: " + text
