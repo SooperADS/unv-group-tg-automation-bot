@@ -1,6 +1,11 @@
 {
 	"$schema": "https://json-schema.org/draft/2020-12/schema",
 	"$defs": {
+		"comment-prop": {
+			"type": "string",
+			"title": "Комментарий",
+			"description": "Используйте это свойство для пометок в JSON"
+		},
 		"exam-kind": {
 			"description": "\"simple\" - обычный зачёт\n\"diff\" - дифференцированный зачёт\n\"full\" - экзамен\nnull - неизвестно",
 			"enum": [ "simple", "full", "diff", null ]
@@ -9,7 +14,6 @@
 			"description": "\"lecture\" - лекция\n\"practice\" - практика\n\"consultation\" - консультация\n\"exam\" - экзамен",
 			"enum": [ "lecture", "practice", "consultation", "exam" ]
 		},
-
 		"id": {
 			"minLength": 1,
 			"maxLength": 16,
@@ -51,7 +55,6 @@
 				}
 			]
 		},
-
 		"lesson": {
 			"type": "array",
 			"minItems": 2,
@@ -65,10 +68,14 @@
 				}
 			]
 		},
+
 		"subject": {
 			"type": "object",
 			"title": "Описатель дисциплины",
 			"properties": {
+				"$comment": {
+					"$ref": "#/$defs/comment-prop"
+				},
 				"chat": {
 					"title": "Ссылка на чат предмета",
 					"oneOf": [
@@ -78,6 +85,9 @@
 						{
 							"type": "object",
 							"properties": {
+								"$comment": {
+									"$ref": "#/$defs/comment-prop"
+								},
 								"main": {
 									"$ref": "#/$defs/link?"
 								},
@@ -88,7 +98,7 @@
 									"$ref": "#/$defs/link?"
 								}
 							},
-							"minProperties": 1
+							"additionalProperties": false
 						}
 					]
 				},
@@ -105,6 +115,9 @@
 					"title": "Информация об экзамене",
 					"type": "object",
 					"properties": {
+						"$comment": {
+							"$ref": "#/$defs/comment-prop"
+						},
 						"kind": {
 							"title": "Тип экзамена",
 							"$ref": "#/$defs/exam-kind"
@@ -120,9 +133,11 @@
 							"$ref": "#/$defs/string?"
 						}
 					},
-					"required": [ "kind", "requirements", "form" ]
+					"additionalProperties": false,
+					"required": [ "kind" ]
 				}
 			},
+			"additionalProperties": false,
 			"required": [ "name", "tag", "exam" ]
 		},
 		"day": {
@@ -174,6 +189,9 @@
 		"schedule-note": {
 			"type": "object",
 			"properties": {
+				"$comment": {
+					"$ref": "#/$defs/comment-prop"
+				},
 				"pattern": {
 					"type": "array",
 					"title": "Недели, которые будут повторятся",
@@ -188,20 +206,33 @@
 					"minimum": 1
 				}
 			},
+			"additionalProperties": false,
 			"required": [ "count", "pattern" ]
 		}
 	},
 
 	"type": "object",
 	"properties": {
+		"$comment": {
+			"$ref": "#/$defs/comment-prop"
+		},
+		"$schema": {
+			"type": "string"
+		},
 		"general": {
 			"type": "object",
 			"properties": {
+				"$comment": {
+					"$ref": "#/$defs/comment-prop"
+				},
 				"timings": {
 					"type": "object",
 					"title": "Временные метки в расписании",
 					"description": "Указывает дату и время событий и точек отсчёта",
 					"properties": {
+						"$comment": {
+							"$ref": "#/$defs/comment-prop"
+						},
 						"lessons": {
 							"type": "array",
 							"title": "Временные метки начала пар",
@@ -230,19 +261,19 @@
 							"maximum": 2100
 						}
 					},
+					"additionalProperties": false,
 					"required": [ "lessons", "lesson-duration", "first-week", "first-year" ]
 				},
 				"chat": {
-					"title": "Ссылка на основной чат",
-					"$ref": "#/$defs/link"
+					"$ref": "#/$defs/link",
+					"title": "Ссылка на основной чат"
 				},
 				"name": {
-					"type": "string",
-					"title": "Имя расписания",
-					"minLength": 1,
-					"maxLength": 64
+					"$ref": "#/$defs/string?",
+					"title": "Имя расписания"
 				}
 			},
+			"additionalProperties": false,
 			"required": [ "timings", "chat" ]
 		},
 		"subjects": {
@@ -283,5 +314,6 @@
 			}
 		}
 	},
+	"additionalProperties": false,
 	"required": [ "subjects", "general", "schedule" ]
 }

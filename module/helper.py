@@ -263,7 +263,7 @@ def _decode_subject_arg(args: list[str] | None, s: sc.Schedule) -> sc.Subject | 
 	subject = s.get_subject_by_str(tag_or_id)
 
 	if subject is None:
-		LOG.warning(f"Unknown subject {tag_or_id!r} in schedule {s.name!r}")
+		LOG.warning(f"Unknown subject {pret.escape_unformatted(f"{tag_or_id!r}")} in schedule {s.name!r}")
 		return pret.unknown_subject_err(tag_or_id)
 	
 	return subject
