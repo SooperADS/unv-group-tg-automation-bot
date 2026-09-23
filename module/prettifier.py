@@ -36,7 +36,7 @@ def weekday_name(index: int) -> str:
 def exam_kind_name(kind: SubjectExamKind) -> str:
 	match kind:
 		case SubjectExamKind.SIMPLE: return 'зачёт'
-		case SubjectExamKind.DIFF: return 'диф-зачёт'
+		case SubjectExamKind.DIFF: return 'диф\\-зачёт'
 		case SubjectExamKind.FULL: return 'экзамен'
 		case SubjectExamKind.UNKNOWN: return 'неизвестно'
 
